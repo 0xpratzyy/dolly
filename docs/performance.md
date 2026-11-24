@@ -137,3 +137,33 @@ Targets that were not reached, and why:
 - **End to end under ~90 s**: reached (52 s); the remaining time is the desktop take.
 - **The caption / key stills** are still drawn by Remotion in headless Chrome (1.6-1.9 s the first time a caption set is seen,
   cached after): they are React compositions from Subtle, not plain HTML, so the WebKit atlas does not apply without porting them.
+
+## Speed round 2, 2026-11-24
+
+Goal: one 10 s take at normal under ~25 s with the same output. Same Mac, `nice 10`, one job at a time; "today" is the round-1 code
+measured the same afternoon (38.2 s for the `subtle-hero.json` desktop take: 604 frames, `Page.captureScreenshot` 53.5 ms each,
+fixed costs about 2.5 s). Every number comes from `--profile` / `DOLLY_PROFILE` or a scratch benchmark of the same calls.
+
+| Approach | Before | After | Quality check | Kept |
+|---|---|---|---|---|
+| Scene-parallel takes: scenes that open with a `goto` (or say `"independent": true`) record in a second Chrome and are stitched (`examples/subtle-goto.json`, 3 scenes, 16.6 s) | take 71.1 s, `make --vertical no` 78 s | take **50.1 s**, make **59 s** | motion check identical (41 vs 39 duplicates in motion, 17 vs 17 hitches, judder 0.027 vs 0.027); cuts sit on the page-load cross-fades; frame reuse works in each segment | **default** at normal / max (off at lite, for paced Narrate scripts, and inside `make` while the phone take overlaps: 2 Chromes at most) |
+| `--surface native`: Chrome runs at the device scale itself (`--force-device-scale-factor`) as well as emulating it, so a frame is a plain copy of the surface | 38.2 s (53.5 ms a frame) | **29.0-29.7 s** (38-40 ms a frame) | as sharp (Laplacian 4.18 vs 4.17), but layout snaps to device pixels like a real Retina Chrome: lines sit 1-3 px off the emulated take, SSIM 0.970-0.980 against today (two emulated takes: 0.9998); the phone take is unchanged (SSIM 0.99975) and gains nothing | flag only (misses the SSIM >= 0.98 bar on a pure layout shift) |
+| 1. Pixels only where needed (1x frame outside zooms, a 2x crop inside) | | | a 1x frame shown at zoom 1 in the 1080p film: SSIM 0.962 / 0.975 against the 2x frame (0.954 / 0.966 at zoom 1.5): too soft | no |
+| 1. (what it would save) | full 2x 55 ms | 1x full 23 ms, 2x crop of a quarter 25 ms, but non-integer scales 40-45 ms and on a native surface a crop costs as much as the frame (38 vs 41 ms): Chrome's cost is mostly fixed per call | | no |
+| Screencast frames in step with the clock (native surface makes `Page.startScreencast` deliver 2880x1800) | | 16.7-20 ms a frame pipelined | exact on a test page (600/600 frames carry their own step number), but on a real page draws lag the clock: 20 of 600 frames missing / misplaced waiting 2 frames, 5 of 600 waiting 3 (and then 38 ms a frame). Not deterministic | no |
+| 3. WebKit spike (`WKWebView` offscreen, vclock.js injected, `takeSnapshot` at 2x) | | 9 ms a frame on a simple page (240/240 frames identical over two runs) | on subtle.refs.video 79 ms a frame (snapshot 69 ms, also with the videos hidden) and only 51 / 145 of 300 frames identical between two runs | no (`--capture webkit` not wired) |
+| Emulated scale on the view (`setDeviceMetricsOverride scale: 2`, no clip) | 60 ms | 56 ms | identical pixels (SSIM 0.99975) | no (too small) |
+
+Where the time goes in Chrome (trace of one 2880x1800 shot): JPEG encode 18 ms in the browser process, plus frame production and
+GPU readback; with an emulated clip Chrome also re-renders the page at 2x for each shot (4 main frames per shot, 25 ms of display-list
+updates). Concurrent tile captures do not overlap (two halves 43 ms, four rows 55 ms). WebP 156 ms, PNG 119 ms, JPEG q80 = q92.
+
+Result: the single-take target is **not** reached with today's output: the default take is still about 38 s (scene-parallel only
+helps scripts with goto / independent scenes). `--surface native` gets one take to 29 s if a 1-3 px layout shift against the
+emulated render is acceptable (the native render is what a real Retina Chrome shows). What would go further: a Linux Chrome
+(`HeadlessExperimental.beginFrame` works there) in a VM, or splitting one continuous take at calm points with an off-camera
+fast-forward (needs takes that repeat to the frame; holds still wait on the network in real time).
+
+End to end with the phone take (`make.mjs subtle-hero.json`, normal): 48 s (52.3 s in round 1; scene-parallel stays off there).
+
+**Default since 2026-11-24:** `--surface native` (about 29 s per 10 s take instead of 38 s). It renders like a real Retina Chrome; layout can differ 1–3 px from the emulated path, with the same sharpness. Use `--surface emulated` for the old behaviour.

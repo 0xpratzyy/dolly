@@ -8,7 +8,7 @@
 //   recording.mp4 (viewport at --dsf, default 2x), events.json (../CONTRACT.md), scenes.json, timing.json, script.json
 //
 //   node smooth.mjs script.json --out dir [--viewport 1440x900] [--dsf 2] [--mobile] [--storage state.json] [--fps 60] [--seed 1]
-//                   [--image jpeg|png] [--jpeg-quality 92] [--no-skip] [--crf 14] [--headed]
+//                   [--image jpeg|png] [--jpeg-quality 92] [--no-skip] [--crf 14] [--headed] [--scenes-parallel false] [--surface native|emulated]
 // Speed (docs/performance.md "Speed pass"): frames are JPEG screenshots (PNG with --image png), the page clock steps over raw CDP,
 // a frame where nothing visible changed repeats the last picture, and videos off screen are not seeked.
 // Usually run through drive.mjs / make.mjs with `--capture smooth` (the default for autopilot takes). Real-time window capture
@@ -57,8 +57,105 @@ let rs = (Number(flags.seed ?? script.seed ?? 1) * 2654435761) >>> 0;
 const rnd = () => { rs = (rs + 0x6d2b79f5) | 0; let t = Math.imul(rs ^ (rs >>> 15), 1 | rs); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 const rr = (a, b) => a + rnd() * (b - a);
 
+// ---------------------------------------------------------------- scene-parallel takes (--scenes-parallel, docs/performance.md "Speed round 2")
+// A scene that starts with a `goto` (a fresh page: already a cut, with a cross-fade on camera) or is marked "independent": true does
+// not need the scenes before it, so the take splits there into segments that record in parallel headless Chromes (2 at normal / max;
+// off at lite and for paced Narrate scripts) and are stitched on one timeline: the videos are joined without re-encoding, the events
+// shifted, and the drawn cursor glides from where segment N left it to where segment N+1 starts, before it first moves.
+const SEG = script._segment ?? null; // set in the per-segment scripts the parent writes
+const sceneActions = (sc) => (MOBILE && sc.mobileActions ? sc.mobileActions : sc.actions ?? []).flatMap((a) => (MOBILE && 'mobile' in a ? (a.mobile ? [a.mobile].flat() : []) : [a]));
+// A goto scene whose page depends on what earlier scenes did (a login, a setting kept in localStorage) says "independent": false.
+const startsFresh = (sc) => sc.independent === true || (sc.independent !== false && 'goto' in (sceneActions(sc)[0] ?? {}));
+// On by default (it changes nothing for a script without such scenes); `--scenes-parallel false` or DOLLY_SCENES_PARALLEL=0 turns it
+// off (make.mjs does while the phone take records next to this one: two Chromes at most).
+if (!SEG && flags['scenes-parallel'] !== 'false' && process.env.DOLLY_SCENES_PARALLEL !== '0' && !PACED) {
+  const cuts = (script.scenes ?? []).map((sc, i) => i).filter((i) => i > 0 && startsFresh(script.scenes[i]));
+  const jobs = QUALITY.mode === 'lite' ? 1 : 2;
+  if (cuts.length && jobs > 1) { await scenesParallel([0, ...cuts], jobs); process.exit(0); }
+  log(cuts.length ? 'scenes-parallel: off at lite, one take' : 'scenes-parallel: no scene starts with a goto or is marked independent, one take');
+}
+async function scenesParallel(starts, jobs) {
+  const n = starts.length, r1 = (v) => Math.round(v * 10) / 10;
+  const endTotal = phase('capture.scenesParallel', {segments: n, jobs});
+  log(`scenes-parallel: ${n} segments (scenes ${starts.map((s, k) => `${s + 1}-${k + 1 < n ? starts[k + 1] : script.scenes.length}`).join(', ')}), ${jobs} at a time`);
+  const passOn = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === pos[0]) continue;
+    if (a === '--out') { i++; continue; }
+    if (a === '--scenes-parallel') { if (argv[i + 1] && !argv[i + 1].startsWith('--')) i++; continue; }
+    passOn.push(a);
+  }
+  const segs = starts.map((s, k) => {
+    const d = path.join(outDir, `.seg${k}`);
+    fs.rmSync(d, {recursive: true, force: true}); fs.mkdirSync(d, {recursive: true});
+    const sub = {...script, scenes: script.scenes.slice(s, k + 1 < n ? starts[k + 1] : undefined), _segment: {index: k, count: n, firstScene: s}};
+    if (k > 0) sub.leadMs = 0;
+    const file = path.join(d, 'segment.json');
+    fs.writeFileSync(file, JSON.stringify(sub));
+    return {k, d, file};
+  });
+  const kids = new Set();
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { for (const c of kids) try { c.kill(sig); } catch {} process.exit(130); });
+  const runSeg = (sg) => new Promise((res, rej) => {
+    const c = spawn(process.execPath, [fileURLToPath(import.meta.url), sg.file, '--out', sg.d, ...passOn], {stdio: ['ignore', 'pipe', 'inherit']});
+    kids.add(c);
+    let out = ''; c.stdout.on('data', (b) => { out += b; });
+    c.on('exit', (code) => { kids.delete(c); code === 0 ? res() : rej(new Error(`segment ${sg.k + 1} failed (${code}): ${out.trim().split('\n').pop() ?? ''}`)); });
+  });
+  const queue = [...segs];
+  let failed = null;
+  await Promise.all(Array.from({length: Math.min(jobs, n)}, async () => {
+    for (let sg; !failed && (sg = queue.shift());) await runSeg(sg).catch((e) => { failed = e; for (const c of kids) try { c.kill('SIGTERM'); } catch {} });
+  }));
+  if (failed) die(failed.message);
+  // stitch: one timeline, frame-exact offsets (a segment has one cursor sample per frame)
+  const endStitch = phase('capture.stitch');
+  const evs = segs.map((sg) => JSON.parse(fs.readFileSync(path.join(sg.d, 'events.json'), 'utf8')));
+  const rd = (sg, f) => { const p = path.join(sg.d, f); return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : []; };
+  const all = {cursor: [], clicks: [], keys: [], scroll: [], loading: []};
+  const scenesOut = [], timingOut = [];
+  let off = 0; // frames before this segment
+  for (const [k, e] of evs.entries()) {
+    const ms = off * DT, at = (t) => Math.round(t + ms);
+    const cur = e.cursor.map(([t, x, y]) => [r1(t + ms), x, y]);
+    if (k > 0 && all.cursor.length && cur.length) { // the drawn cursor glides from the last segment's end to this one's start
+      const [, ex, ey] = all.cursor.at(-1), [, sx, sy] = cur[0];
+      let j = cur.findIndex(([, x, y]) => x !== sx || y !== sy);
+      if (j < 0) j = cur.length;
+      const g = Math.min(j, Math.round(600 / DT)), g0 = j - g;
+      for (let i = 0; i < j; i++) { const u = i < g0 ? 0 : minJerk((i - g0 + 1) / (g + 1)); cur[i] = [cur[i][0], r1(ex + (sx - ex) * u), r1(ey + (sy - ey) * u)]; }
+    }
+    all.cursor.push(...cur);
+    for (const key of ['clicks', 'keys', 'scroll']) all[key].push(...e[key].map((c) => ({...c, tMs: at(c.tMs)})));
+    all.loading.push(...e.loading.map((c) => ({startMs: at(c.startMs), endMs: at(c.endMs)})));
+    scenesOut.push(...rd(segs[k], 'scenes.json').map((s) => ({...s, startMs: at(s.startMs), endMs: at(s.endMs)})));
+    timingOut.push(...rd(segs[k], 'timing.json').map((t) => ({...t, scene: t.scene + starts[k], actualMs: at(t.actualMs)})));
+    off += e.cursor.length;
+  }
+  const list = path.join(outDir, '.segments.txt');
+  fs.writeFileSync(list, segs.map((sg) => `file '${path.join(sg.d, 'recording.mp4').replace(/'/g, "'\\''")}'`).join('\n'));
+  const cat = spawn('ffmpeg', ['-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', path.join(outDir, 'recording.mp4')], {stdio: 'inherit'});
+  if (await new Promise((r) => cat.on('exit', r)) !== 0) die('ffmpeg could not join the segments');
+  const events = {...evs[0], durationMs: Math.round(off * DT), cursor: all.cursor, clicks: all.clicks, loading: all.loading, keys: all.keys, scroll: all.scroll,
+    segments: segs.map((sg, k) => ({firstScene: starts[k] + 1, frames: evs[k].cursor.length}))};
+  fs.writeFileSync(path.join(outDir, 'events.json'), JSON.stringify(events));
+  fs.writeFileSync(path.join(outDir, 'scenes.json'), JSON.stringify(scenesOut, null, 2));
+  fs.copyFileSync(pos[0], path.join(outDir, 'script.json'));
+  if (timingOut.length) fs.writeFileSync(path.join(outDir, 'timing.json'), JSON.stringify(timingOut, null, 2));
+  for (const sg of segs) fs.rmSync(sg.d, {recursive: true, force: true});
+  fs.rmSync(list, {force: true});
+  endStitch();
+  endTotal({frames: off});
+  console.log(`recorded ${outDir}: ${(off * DT / 1000).toFixed(1)} s, ${events.width}x${events.height}, exactly ${FPS} fps (${off} frames, ${n} segments in parallel), ${all.clicks.length / 2} clicks, ${all.keys.length} keys, ${all.scroll.length} scroll steps`);
+}
+
 // ---------------------------------------------------------------- browser
-const launchOpts = {headless: flags.headed !== 'true', args: ['--hide-scrollbars', '--force-color-profile=srgb', '--font-render-hinting=none', '--disable-smooth-scrolling', '--disable-features=CalculateNativeWinOcclusion', '--autoplay-policy=no-user-gesture-required']};
+// --surface native (default since 2026-11-24; --surface emulated restores the old path): the browser itself runs at the device scale (--force-device-scale-factor) as well as emulating it,
+// so a frame is a plain copy of the surface (~34 ms at 2880x1800 instead of ~53 ms for an emulated clip, which re-renders at 2x). Layout snaps to
+// device pixels the way a real Retina Chrome does, so text can sit a pixel or two off the emulated take (docs/performance.md).
+const NATIVE = flags.surface !== 'emulated';
+const launchOpts = {headless: flags.headed !== 'true', args: [...(NATIVE ? [`--force-device-scale-factor=${DSF}`] : []), '--hide-scrollbars', '--force-color-profile=srgb', '--font-render-hinting=none', '--disable-smooth-scrolling', '--disable-features=CalculateNativeWinOcclusion', '--autoplay-policy=no-user-gesture-required']};
 let browser;
 const endLaunch = phase('capture.launch');
 try { browser = await chromium.launch({...launchOpts, channel: 'chromium'}); } // full Chromium in new headless mode (has the video codecs)
@@ -181,6 +278,7 @@ async function shot(fmt = IMG) {
       // The clip's scale must carry the device scale: without a clip CDP returns a CSS-pixel-sized (1x) picture whatever the
       // context's deviceScaleFactor (every take was 1440x900 labelled 2x: soft when zoomed). A clip is in page coordinates,
       // so it starts at the scroll position.
+      if (NATIVE) return Buffer.from((await prof.time('shot', cdp.send('Page.captureScreenshot', {format: fmt, ...(fmt === 'jpeg' ? {quality: JPEG_Q} : {}), fromSurface: true, optimizeForSpeed: true}))).data, 'base64');
       const vv = (await prof.time('metrics', cdp.send('Page.getLayoutMetrics'))).cssVisualViewport;
       const r = await prof.time('shot', cdp.send('Page.captureScreenshot', {format: fmt, ...(fmt === 'jpeg' ? {quality: JPEG_Q} : {}), fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true,
         clip: {x: vv.pageX, y: vv.pageY, width: VW, height: VH, scale: DSF}}));
@@ -479,8 +577,11 @@ async function runAction(a) {
 const t00 = Date.now();
 log(`virtual-time capture: ${VW}x${VH} @${DSF}x, ${FPS} fps, ${IMG} frames${MOBILE ? ', phone' : ''}`);
 const endFirst = phase('capture.firstLoad');
-await page.goto(BASE, {waitUntil: 'commit', timeout: 45000});
-await settleDocument(Math.max(1800, script.settleMs ?? 0));
+// a later segment of a scene-parallel take that opens with a goto loads that page itself (off camera): no first load of the url
+if (!(SEG?.index > 0 && 'goto' in (sceneActions(script.scenes?.[0] ?? {})[0] ?? {}))) {
+  await page.goto(BASE, {waitUntil: 'commit', timeout: 45000});
+  await settleDocument(Math.max(1800, script.settleMs ?? 0));
+}
 endFirst();
 navStarted = false; docCommitted = false;
 if (MOBILE) { const got = await page.evaluate(() => innerWidth); if (got !== VW) log(`WARNING: the page lays out at ${got} CSS px wide (wanted ${VW})`); }
@@ -503,6 +604,7 @@ try {
     scenes.push({goal: sc.goal ?? '', narration: sc.narration ?? '', startMs: Math.round(start), endMs: Math.round(now())});
   }
   if (PACED && script.endMs) await restUntil(script.endMs);
+  else if (SEG && SEG.index < SEG.count - 1) { /* the next segment carries on: no calm last second here */ }
   else await rest(Math.max(300, (script.tailMs ?? P.leadOutMs) - Math.max(0, now() - holdFrom))); // a calm last second
 } catch (e) {
   failed = e;

@@ -1,0 +1,14 @@
+{
+  "url": "https://subtle.refs.video",
+  "viewport": "1440x900",
+  "avoid": ["checkout", "get pro", "log ?in", "sign ?(in|up)", "claim", "install", "copy prompt"],
+  "tailMs": 2000,
+  "scenes": [
+    {"goal": "Scroll to the style carousel", "narration": "Give it a URL.", "minMs": 0,
+     "actions": [{"scroll": 1080}, {"click": ".chip:has-text(\"Bold\")"}]},
+    {"goal": "Start over and pick a style", "narration": "Claude clicks through it.", "minMs": 0,
+     "actions": [{"goto": "/"}, {"scroll": 1080}, {"click": "button.f[data-style=\"highlighter\"]"}]},
+    {"goal": "The library", "narration": "Every launch film, taken apart.", "minMs": 0,
+     "actions": [{"goto": "https://refs.video/"}, {"scroll": 700}]}
+  ]
+}

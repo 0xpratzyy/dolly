@@ -92,6 +92,10 @@ Actions (a scene runs them in order):
 | `{"wait": 600}` | pause |
 | `{"goto": "/pricing"}` | navigate (relative to `url`) |
 
+A scene that opens with `goto` (or says `"independent": true`) does not need the scenes before it: at normal / max a take records
+such scenes in a second headless Chrome at the same time and stitches them (`--scenes-parallel false` turns it off). Give a `goto`
+scene `"independent": false` when its page depends on what earlier scenes did (a login, a setting kept in the browser).
+
 Targets off screen are scrolled into view with the wheel, not jumped to. A scene that cannot find its target stops the take with
 `failure.png` and exit code 2.
 

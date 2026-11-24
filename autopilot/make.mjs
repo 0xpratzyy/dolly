@@ -57,7 +57,7 @@ const styleArgs = [...(flags.style ? ['--style', flags.style] : []), ...sets.fla
 const vmode = flags.vertical === undefined || flags.vertical === 'true' ? (polish ? 'letterbox' : 'mobile') : flags.vertical; // mobile | letterbox | no
 const driveArgs = (out, extra = []) => {
   const a = [path.join(here, 'drive.mjs'), path.resolve(pos[0]), '--out', out, '--quality', quality.mode, ...extra];
-  for (const k of ['dsf', 'capture', 'pos', 'keep-raw']) if (flags[k]) a.push(`--${k}`, flags[k]);
+  for (const k of ['dsf', 'capture', 'pos', 'keep-raw', 'scenes-parallel', 'surface']) if (flags[k]) a.push(`--${k}`, flags[k]);
   return a;
 };
 const mobileDir = path.join(dir, 'mobile');
@@ -67,8 +67,10 @@ const mobileDir = path.join(dir, 'mobile');
 const scriptJson = polish ? {} : readJson(path.resolve(pos[0]));
 const smoothTake = !polish && ['auto', 'smooth', undefined].includes(flags.capture ?? scriptJson.capture) && (scriptJson.paced !== true || (flags.capture ?? scriptJson.capture) === 'smooth');
 const overlap = quality.mode !== 'lite' && smoothTake && vmode === 'mobile' && flags.sequential !== 'true';
-const takeDesktop = () => run('node', driveArgs(dir, flags.viewport ? ['--viewport', flags.viewport] : []), {}, 'take.desktop');
-const takePhone = () => run('node', driveArgs(mobileDir, ['--mobile', ...(flags['mobile-viewport'] ? ['--viewport', flags['mobile-viewport']] : [])]), {}, 'take.phone');
+// While the two takes overlap neither splits into parallel scenes (smooth.mjs --scenes-parallel): two Chromes at most.
+const solo = overlap ? ['--scenes-parallel', 'false'] : [];
+const takeDesktop = () => run('node', driveArgs(dir, [...(flags.viewport ? ['--viewport', flags.viewport] : []), ...solo]), {}, 'take.desktop');
+const takePhone = () => run('node', driveArgs(mobileDir, ['--mobile', ...(flags['mobile-viewport'] ? ['--viewport', flags['mobile-viewport']] : []), ...solo]), {}, 'take.phone');
 let phoneTake = Promise.resolve();
 if (!polish) {
   if (overlap) { console.log('overlap: the phone take records next to the desktop take'); phoneTake = takePhone(); }
