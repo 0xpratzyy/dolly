@@ -150,7 +150,8 @@ async function renderStills(jobs, {stamp, subtleDir}) {
       entryPoint: path.join(studioDir, 'src/remotion/entry.ts'), outDir: tmp, publicDir: pub,
       webpackOverride: (c) => ({...c, resolve: {...c.resolve, alias: {...(c.resolve?.alias ?? {}), '@subtle': path.join(subtleDir, 'template/src'), remotion: nm('remotion'), react: nm('react'), 'react-dom': nm('react-dom'), '@remotion/layout-utils': nm('@remotion/layout-utils')}}}),
     });
-    fs.renameSync(tmp, serveUrl);
+    try { fs.renameSync(tmp, serveUrl); } // another render (the 9:16 cut, running next to this one) may have finished the same bundle first
+    catch (e) { if (!fs.existsSync(path.join(serveUrl, 'index.html'))) throw e; fs.rmSync(tmp, {recursive: true, force: true}); }
     fs.rmSync(pub, {recursive: true, force: true});
     // older bundles are of no use any more
     for (const d of fs.readdirSync(cacheDir)) if (d.startsWith('bundle-') && d !== `bundle-${stamp}` && !d.includes('.tmp-')) fs.rmSync(path.join(cacheDir, d), {recursive: true, force: true});

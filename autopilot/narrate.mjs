@@ -19,7 +19,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -39,16 +39,41 @@ for (let i = 0; i < argv.length; i++) {
 const die = (m, code = 1) => { console.error(m); process.exit(code); };
 const log = (...a) => console.error('[narrate]', ...a);
 const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
-const run = (cmd, args, opt = {}) => {
+const stepName = (cmd, args) => `${path.basename(args[0] ?? cmd).replace(/\.m?js$/, '')} ${args[1] && !args[1].startsWith('/') ? args[1] : ''}`.trim();
+const run = (cmd, args, opt = {}, name = stepName(cmd, args)) => {
+  const end = prof.phase(`step.${name}`);
   const r = spawnSync(cmd, args, {stdio: 'inherit', ...opt});
+  end();
   if (r.status !== 0) die(`${cmd} ${args.slice(0, 3).join(' ')} failed (${r.status})`, r.status === 2 ? 2 : 1);
 };
+/** The same, without blocking: two steps may overlap in normal / max (docs/performance.md, "Speed pass"). */
+const kids = new Set();
+const runAsync = (cmd, args, opt = {}, name = stepName(cmd, args)) => new Promise((res) => {
+  const end = prof.phase(`step.${name}`);
+  const child = spawn(cmd, args, {stdio: 'inherit', ...opt});
+  kids.add(child);
+  child.on('exit', (code) => { kids.delete(child); end(); if (code !== 0) { for (const k of kids) try { k.kill('SIGTERM'); } catch {} die(`${cmd} ${args.slice(0, 3).join(' ')} failed (${code})`, code === 2 ? 2 : 1); } res(); });
+});
 const norm = (w) => String(w).toLowerCase().replace(/[^\p{L}\p{N}%]+/gu, '');
 const DEFAULT_AVOID = ['checkout', 'get pro', 'upgrade', 'subscribe', 'buy', 'purchase', 'pay\\b', 'log ?out', 'sign ?out', 'log ?in', 'sign ?(in|up)', 'delete', 'remove account'];
 const TAIL_MS = 1000;
 
 const dir = path.resolve(flags.out ?? (flags.voice ? path.join(os.homedir(), 'demos', path.basename(flags.voice).replace(/\.[^.]+$/, '') + '-narrate') : ''));
 const planPath = path.join(dir, 'narration-plan.json');
+// --profile (or DOLLY_PROFILE=1): phase timings of every step in <dir>/profile.json (studio/scripts/lib/profile.mjs)
+const PROFILE = (flags.profile === 'true' || process.env.DOLLY_PROFILE === '1') && !!flags.out;
+const profFile = path.join(dir, '.profile.jsonl');
+if (PROFILE) { fs.mkdirSync(dir, {recursive: true}); fs.rmSync(profFile, {force: true}); process.env.DOLLY_PROFILE = profFile; } // before the import: it reads the variable once
+else if (process.env.DOLLY_PROFILE === '1') delete process.env.DOLLY_PROFILE;
+const prof = await import(path.join(studio, 'scripts/lib/profile.mjs'));
+const tRun = Date.now();
+const mem = PROFILE ? prof.treeMemory() : null;
+process.on('exit', () => {
+  if (!PROFILE) return;
+  const json = prof.writeProfile(profFile, path.join(dir, 'profile.json'), {totalMs: Date.now() - tRun, peakRss: mem.stop(), meta: {command: `narrate ${sub}`, date: new Date().toISOString()}});
+  fs.rmSync(profFile, {force: true});
+  prof.printProfile(json, (m) => console.error(m));
+});
 
 // ======================================================================== explore
 async function explore(url, outDir, {shots = false, maxPages = 6, storage} = {}) {
@@ -128,7 +153,7 @@ function prepareInputs() {
     const j = /\{[\s\S]*"target_offset"[\s\S]*?\}/.exec(pass1.stderr)?.[0];
     let ln = 'loudnorm=I=-16:TP=-1.5:LRA=11';
     if (j) { const m = JSON.parse(j); ln += `:measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`; }
-    run('ffmpeg', ['-v', 'error', '-y', '-i', wav, '-af', ln, '-ar', '48000', '-ac', '2', '-c:a', 'aac', '-b:a', '192k', voice]);
+    run('ffmpeg', ['-v', 'error', '-y', '-i', wav, '-af', ln, '-ar', '48000', '-ac', '2', '-c:a', 'aac', '-b:a', '192k', voice], {}, 'voice.loudnorm');
   }
   const lo = loudness(voice);
   info.durationMs = ffprobeInfo(voice).durationMs; // the voice track's own length (a video's container can be longer than its audio)
@@ -140,7 +165,7 @@ function prepareInputs() {
       // a square crop around the face (default: centred horizontally, a bit above the middle), 720 px, capped at 30 fps, no audio
       const [fx, fy] = (flags['facecam-focus'] ?? '0.5,0.35').split(',').map(Number);
       const vf = `crop='min(iw,ih)':'min(iw,ih)':'(iw-min(iw,ih))*${fx}':'(ih-min(iw,ih))*${fy ?? 0.35}',scale=720:720,fps=30`;
-      run('ffmpeg', ['-v', 'error', '-y', '-i', input, '-an', '-vf', vf, '-c:v', 'libx264', '-crf', '20', '-pix_fmt', 'yuv420p', facecam]);
+      run('ffmpeg', ['-v', 'error', '-y', '-i', input, '-an', '-vf', vf, '-c:v', 'libx264', '-crf', '20', '-pix_fmt', 'yuv420p', facecam], {}, 'facecam.crop');
     }
     log(`face-cam: ${info.width}x${info.height} -> square 720 px ${facecam}`);
   }
@@ -151,7 +176,7 @@ function prepareInputs() {
     if (flags.lang) targs.push('--lang', flags.lang);
     if (flags.hinglish) targs.push('--hinglish');
     if (flags.vocab) targs.push('--vocab', flags.vocab);
-    run('uv', targs, {stdio: ['ignore', 'inherit', 'inherit']});
+    run('uv', targs, {stdio: ['ignore', 'inherit', 'inherit']}, 'transcribe');
   }
   const transcript = readJson(tPath);
   return {info, voice, facecam, transcript};
@@ -330,7 +355,9 @@ function runCheck(script, label = '') {
   const results = {};
   for (const mobile of flags.vertical ? [false, true] : [false]) {
     const a = [path.join(here, 'drive.mjs'), sp, '--out', cdir, '--check', ...extra, ...(mobile ? ['--mobile'] : [])];
+    const endC = prof.phase(`step.check.${mobile ? 'phone' : 'desktop'}`);
     const r = spawnSync('node', a, {stdio: ['ignore', 'inherit', 'pipe'], encoding: 'utf8'});
+    endC();
     if (r.stderr) for (const l of r.stderr.split('\n')) if (/MISSING|refusing|FAILED|WARNING/.test(l)) console.error(l);
     results[mobile ? 'mobile' : 'desktop'] = r.status === 0;
   }
@@ -371,29 +398,32 @@ function captionsFor(plan) {
   return out;
 }
 
-function compose(plan, prep) {
+async function compose(plan, prep) {
   const takes = [{d: dir, vertical: false}];
   if (fs.existsSync(path.join(dir, 'mobile', 'events.json'))) takes.push({d: path.join(dir, 'mobile'), vertical: true});
   const caps = captionsFor(plan);
   const voiceFile = path.join(dir, plan.voice ?? 'voice.m4a');
   const camFile = plan.facecam && !flags['no-facecam'] ? path.join(dir, plan.facecam) : null;
   const capStyle = flags['captions-style'];
-  for (const t of takes) {
+  // one after the other: two native renders side by side share the one hardware encoder and finish no sooner (9.9 s vs 10.2 s
+  // for this example, with 1.3x the memory; docs/performance.md "Speed pass")
+  const one = async (t) => {
     fs.writeFileSync(path.join(t.d, 'captions.json'), JSON.stringify(caps, null, 2));
     // plan without idle speed-up: output time must equal recording time so the voice and the face-cam stay locked to the screen
-    run('node', [path.join(studio, 'dolly.mjs'), 'plan', t.d, '--idle', 'off']);
+    run('node', [path.join(studio, 'dolly.mjs'), 'plan', t.d, '--idle', 'off'], {}, `plan.${t.vertical ? 'phone' : 'desktop'}`);
     linkInto(voiceFile, t.d);
     if (camFile) linkInto(camFile, t.d);
     const common = ['--captions', path.join(t.d, 'captions.json'), '--audio', path.join(t.d, path.basename(voiceFile)), ...(camFile ? ['--facecam', path.join(t.d, path.basename(camFile))] : []),
       '--set', 'idleSpeedup=false', ...(capStyle ? ['--set', `captions.style=${capStyle}`] : [])];
     if (!t.vertical) {
-      run('node', [path.join(studio, 'dolly.mjs'), 'render', t.d, ...styleArgs(), ...common, ...facecamSets(), '--out', path.join(dir, 'out.mp4')]);
+      await runAsync('node', [path.join(studio, 'dolly.mjs'), 'render', t.d, ...styleArgs(), ...common, ...facecamSets(), '--out', path.join(dir, 'out.mp4')], {}, 'render.16x9');
     } else {
       // the phone take is already 9:16: full frame, no synthetic cursor, no auto zoom; the face bubble glides away from the taps
       const phone = ['--set', 'aspect=9:16', '--set', 'fit=crop', '--set', 'padding=0', '--set', 'radius=0', '--set', 'shadow=0', '--set', 'frame=none', '--set', 'cursor.visible=false', '--set', 'zoom.auto=false', '--set', 'facecam.size=0.26'];
-      run('node', [path.join(studio, 'dolly.mjs'), 'render', t.d, ...phone, ...styleArgs(), ...common, ...facecamSets(), '--out', path.join(dir, 'vertical.mp4')]);
+      await runAsync('node', [path.join(studio, 'dolly.mjs'), 'render', t.d, ...phone, ...styleArgs(), ...common, ...facecamSets(), '--out', path.join(dir, 'vertical.mp4')], {}, 'render.9x16');
     }
-  }
+  };
+  for (const t of takes) await one(t);
   return takes;
 }
 
@@ -485,7 +515,7 @@ if (sub === 'check' || sub === 'compose') {
     const r = runCheck(script);
     process.exit(Object.values(r).every(Boolean) ? 0 : 2);
   }
-  compose(plan);
+  await compose(plan);
   const s1 = await makeSheet(plan, path.join(dir, 'out.mp4'), path.join(dir, 'timing.json'), 'sheet');
   console.log(`sheet: ${s1.out}`);
   if (fs.existsSync(path.join(dir, 'vertical.mp4'))) console.log(`vertical sheet: ${(await makeSheet(plan, path.join(dir, 'vertical.mp4'), path.join(dir, 'mobile', 'timing.json'), 'vertical')).out}`);
@@ -529,11 +559,16 @@ const dflags = [];
 for (const k of ['dsf', 'capture', 'pos', 'viewport', 'storage']) if (flags[k]) dflags.push(`--${k}`, flags[k]);
 dflags.push('--quality', quality.mode);
 log('recording: a Chromium window plays for about ' + Math.round(script.endMs / 1000 + 8) + ' s on this screen (only that window is captured)');
-run('node', [path.join(here, 'drive.mjs'), scriptPath, '--out', dir, ...dflags]);
-if (flags.vertical) run('node', [path.join(here, 'drive.mjs'), scriptPath, '--out', path.join(dir, 'mobile'), '--mobile', ...dflags.filter((x, i, a) => !(a[i - 1] === '--viewport' || x === '--viewport'))]);
+{
+  const desk = () => runAsync('node', [path.join(here, 'drive.mjs'), scriptPath, '--out', dir, ...dflags], {}, 'take.desktop');
+  const phone = () => runAsync('node', [path.join(here, 'drive.mjs'), scriptPath, '--out', path.join(dir, 'mobile'), '--mobile', ...dflags.filter((x, i, a) => !(a[i - 1] === '--viewport' || x === '--viewport'))], {}, 'take.phone');
+  // two headless (smooth) takes can record side by side in normal / max; a window capture records a real window, one at a time
+  if (flags.vertical && flags.capture === 'smooth' && quality.mode !== 'lite' && flags.sequential !== 'true') await Promise.all([desk(), phone()]);
+  else { await desk(); if (flags.vertical) await phone(); }
+}
 
 // 3. compose + 4. check sheets
-compose(plan);
+await compose(plan);
 const outs = [path.join(dir, 'out.mp4')];
 const sheetInfo = [await makeSheet(plan, path.join(dir, 'out.mp4'), path.join(dir, 'timing.json'), 'sheet')];
 if (flags.vertical && fs.existsSync(path.join(dir, 'vertical.mp4'))) {

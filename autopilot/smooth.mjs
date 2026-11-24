@@ -8,7 +8,9 @@
 //   recording.mp4 (viewport at --dsf, default 2x), events.json (../CONTRACT.md), scenes.json, timing.json, script.json
 //
 //   node smooth.mjs script.json --out dir [--viewport 1440x900] [--dsf 2] [--mobile] [--storage state.json] [--fps 60] [--seed 1]
-//                   [--image png|jpeg] [--crf 14] [--headed]
+//                   [--image jpeg|png] [--jpeg-quality 92] [--no-skip] [--crf 14] [--headed]
+// Speed (docs/performance.md "Speed pass"): frames are JPEG screenshots (PNG with --image png), the page clock steps over raw CDP,
+// a frame where nothing visible changed repeats the last picture, and videos off screen are not seeked.
 // Usually run through drive.mjs / make.mjs with `--capture smooth` (the default for autopilot takes). Real-time window capture
 // (`--capture window`) stays for pages this cannot drive: real desktop apps, WebRTC, anything that needs a visible window.
 // Motion and pacing numbers: studio/src/types.ts `motionDefaults` (see ../docs/motion-audit.md).
@@ -19,6 +21,8 @@ import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {M, moveMs, cursorPath, scrollMs, minJerk, between} from './motion.mjs';
 import {resolveQuality} from '../studio/scripts/lib/env.mjs';
+import {phase, accumulator, record as profRecord} from '../studio/scripts/lib/profile.mjs';
+const prof = accumulator(); // per-frame sums (DOLLY_PROFILE): net, mouse, step, metrics, shot, encode
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -56,8 +60,10 @@ const rr = (a, b) => a + rnd() * (b - a);
 // ---------------------------------------------------------------- browser
 const launchOpts = {headless: flags.headed !== 'true', args: ['--hide-scrollbars', '--force-color-profile=srgb', '--font-render-hinting=none', '--disable-smooth-scrolling', '--disable-features=CalculateNativeWinOcclusion', '--autoplay-policy=no-user-gesture-required']};
 let browser;
+const endLaunch = phase('capture.launch');
 try { browser = await chromium.launch({...launchOpts, channel: 'chromium'}); } // full Chromium in new headless mode (has the video codecs)
 catch { browser = await chromium.launch(launchOpts); }
+endLaunch();
 let closed = false, enc = null;
 async function shutdown() {
   if (closed) return;
@@ -96,9 +102,20 @@ async function netQuiet(maxMs = 1500) {
   while (pending() > 0 && Date.now() - t0 < maxMs) await realSleep(8);
 }
 
-const step = async (ms = DT) => page.evaluate((d) => window.__vt.step(d), ms);
+// one step of the page clock over the raw CDP session (a Playwright evaluate costs ~2.5 ms more per frame)
+async function step(ms = DT) {
+  let r;
+  try { r = await cdp.send('Runtime.evaluate', {expression: `window.__vt.step(${ms})`, awaitPromise: true, returnByValue: true}); }
+  catch (e) { if (/closed|detached/i.test(e.message)) try { cdp = await ctx.newCDPSession(page); } catch {} throw e; }
+  if (r.exceptionDetails || !r.result?.value) throw new Error(r.exceptionDetails?.text ?? 'no virtual clock in this document');
+  return r.result.value;
+}
 /** Let a freshly loaded document finish off camera: virtual time runs (hydration, fonts, intro animations) until it is calm. */
 async function settleDocument(minMs = 600, maxRealMs = 14000) {
+  const tp = performance.now();
+  try { await settleDocumentInner(minMs, maxRealMs); } finally { prof.add('settle', performance.now() - tp); }
+}
+async function settleDocumentInner(minMs, maxRealMs) {
   await page.waitForLoadState('load', {timeout: 30000}).catch(() => {});
   const t0 = Date.now();
   let pumped = 0, calm = 0;
@@ -118,7 +135,16 @@ async function settleDocument(minMs = 600, maxRealMs = 14000) {
 }
 
 // ---------------------------------------------------------------- encoder (frames are piped straight in: nothing lands on disk)
-const IMG = flags.image === 'jpeg' ? 'jpeg' : 'png';
+// JPEG frames by default: Chrome encodes a 2880x1800 JPEG in about half the time of a PNG, and at quality 92 the take is visually
+// identical after the x264 pass (docs/performance.md, "Speed pass"). --image png keeps the lossless path.
+const IMG = flags.image === 'png' ? 'png' : 'jpeg';
+const JPEG_Q = Number(flags['jpeg-quality'] ?? 92);
+// Frames where nothing changed (no DOM mutation, animation, media, input, scroll or network since the last frame) repeat the last
+// picture instead of taking a new screenshot. --no-skip (or DOLLY_SKIP=0) screenshots every frame; DOLLY_SKIP_VERIFY=1 screenshots
+// every frame and counts the skips that would have been wrong (the safety check for the change signal).
+const SKIP = flags['no-skip'] !== 'true' && flags.skip !== 'false' && process.env.DOLLY_SKIP !== '0';
+const VERIFY = process.env.DOLLY_SKIP_VERIFY === '1';
+const FORCE_EVERY = 12, TAIL = 4; // a real screenshot at least every 12 frames, and for 4 frames after any change
 function startEncoder(file) {
   const proc = spawn('ffmpeg', [
     '-y', '-v', 'error', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', IMG === 'png' ? 'png' : 'mjpeg', '-i', '-',
@@ -141,18 +167,23 @@ const timing = [];
 let frames = 0;
 let cx = Math.round(VW * 0.32), cy = Math.round(VH * 0.62), sentX = -1, sentY = -1;
 let busy = false, curScene = 0, capturing = false;
+let lastBuf = null, sinceShot = 0, tail = 0, dirtyIn = true, netSeen = 0, skipped = 0, missed = 0, verified = 0;
+const inputChanged = () => { dirtyIn = true; };
+let lastFp = '';
+const fpOut = process.env.DOLLY_FP_OUT ? fs.openSync(process.env.DOLLY_FP_OUT, 'w') : null; // test aid: one fingerprint line per frame
+const DRY = process.env.DOLLY_DRY === '1'; // test aid: play the take without screenshots (timing / determinism checks)
 const now = () => frames * DT; // ms on the recording's clock
 const r1 = (n) => Math.round(n * 10) / 10;
 
-async function shot() {
+async function shot(fmt = IMG) {
   for (let k = 0; k < 3; k++) {
     try {
       // The clip's scale must carry the device scale: without a clip CDP returns a CSS-pixel-sized (1x) picture whatever the
       // context's deviceScaleFactor (every take was 1440x900 labelled 2x: soft when zoomed). A clip is in page coordinates,
       // so it starts at the scroll position.
-      const vv = (await cdp.send('Page.getLayoutMetrics')).cssVisualViewport;
-      const r = await cdp.send('Page.captureScreenshot', {format: IMG, ...(IMG === 'jpeg' ? {quality: 96} : {}), fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true,
-        clip: {x: vv.pageX, y: vv.pageY, width: VW, height: VH, scale: DSF}});
+      const vv = (await prof.time('metrics', cdp.send('Page.getLayoutMetrics'))).cssVisualViewport;
+      const r = await prof.time('shot', cdp.send('Page.captureScreenshot', {format: fmt, ...(fmt === 'jpeg' ? {quality: JPEG_Q} : {}), fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true,
+        clip: {x: vv.pageX, y: vv.pageY, width: VW, height: VH, scale: DSF}}));
       return Buffer.from(r.data, 'base64');
     } catch (e) {
       await realSleep(60);
@@ -182,14 +213,34 @@ async function crossNavigation() {
 
 /** One output frame: wait for the network, place the cursor, advance the page by 1/60 s, screenshot. */
 async function frame() {
+  let t = performance.now();
   await netQuiet();
   await crossNavigation();
-  if (cx !== sentX || cy !== sentY) { await page.mouse.move(cx, cy); sentX = cx; sentY = cy; }
-  try { busy = (await step()).busy; } catch { // the document went away under us
+  prof.add('net', performance.now() - t);
+  if (cx !== sentX || cy !== sentY) { t = performance.now(); await page.mouse.move(cx, cy); sentX = cx; sentY = cy; dirtyIn = true; prof.add('mouse', performance.now() - t); }
+  t = performance.now();
+  let changed = true;
+  try { const r = await step(); busy = r.busy; changed = r.changed !== false; lastFp = r.fp; prof.add('step', performance.now() - t); } catch { // the document went away under us
     navStarted = true; await realSleep(80); await crossNavigation();
   }
   if (capturing) {
-    await enc.write(await shot());
+    if (changed || dirtyIn || lastNet !== netSeen || pending() > 0) tail = TAIL;
+    dirtyIn = false; netSeen = lastNet;
+    if (fpOut) fs.writeSync(fpOut, `${frames} ${lastFp} ${Math.round(cx)},${Math.round(cy)}\n`);
+    const fresh = !DRY && (!lastBuf || tail > 0 || sinceShot >= FORCE_EVERY - 1 || !SKIP);
+    if (DRY) lastBuf ??= Buffer.alloc(0);
+    let buf;
+    if (fresh || VERIFY) {
+      buf = await shot();
+      if (!fresh) { // VERIFY: a skip here, was it right? (DOLLY_SKIP_DUMP=<dir> keeps the first wrong pairs)
+        verified++;
+        if (buf.equals(lastBuf)) skipped++;
+        else if (++missed <= 400 && process.env.DOLLY_SKIP_DUMP) { fs.mkdirSync(process.env.DOLLY_SKIP_DUMP, {recursive: true}); fs.writeFileSync(path.join(process.env.DOLLY_SKIP_DUMP, `${frames}-a.jpg`), lastBuf); fs.writeFileSync(path.join(process.env.DOLLY_SKIP_DUMP, `${frames}-b.jpg`), buf); }
+      }
+      lastBuf = buf; sinceShot = 0;
+    } else { buf = lastBuf; sinceShot++; skipped++; }
+    if (tail > 0) tail--;
+    await prof.time('encode', enc.write(buf)); // time blocked on the encoder (pipe back-pressure)
     ev.cursor.push([r1(now()), r1(cx * DSF), r1(cy * DSF)]);
     frames++;
   }
@@ -216,6 +267,7 @@ async function scrollTo(total, ms) {
   for (let i = 1; i <= n; i++) {
     const d = total * minJerk(i / n);
     await page.evaluate((y) => window.scrollTo(0, y), y0 + d);
+    inputChanged();
     ev.scroll.push({tMs: Math.round(now()), dy: r1(d - prev)});
     prev = d;
     await frame();
@@ -334,9 +386,11 @@ async function click(spec, atMs, a) {
   navStarted = false; docCommitted = false;
   await mark();
   await page.mouse.down();
+  inputChanged();
   ev.clicks.push({tMs: Math.round(now()), x: r1(t.x * DSF), y: r1(t.y * DSF), button: 'left', kind: 'down'});
   await rest(between(C.pressMs, rnd()));
   await page.mouse.up();
+  inputChanged();
   ev.clicks.push({tMs: Math.round(now()), x: r1(t.x * DSF), y: r1(t.y * DSF), button: 'left', kind: 'up'});
   await realSleep(120); // real time, clock frozen: does this click navigate?
   const fresh = await crossNavigation();
@@ -366,6 +420,7 @@ async function press(combo, atMs, a) {
   navStarted = false; docCommitted = false;
   await mark();
   await page.keyboard.press(combo);
+  inputChanged();
   await realSleep(120);
   const fresh = await crossNavigation();
   await afterAction('press', a, fresh || page.url() !== url);
@@ -373,12 +428,13 @@ async function press(combo, atMs, a) {
 
 // Typing: keystrokes are logged as timing only. The characters are never stored in the events.
 async function type(text, into, atMs, a) {
-  if (into) { const t = await target(into, atMs != null ? atMs - 1600 : undefined); await pointerTo(t, atMs != null ? atMs - 500 : undefined); await page.mouse.down(); ev.clicks.push({tMs: Math.round(now()), x: r1(t.x * DSF), y: r1(t.y * DSF), button: 'left', kind: 'down'}); await rest(90); await page.mouse.up(); ev.clicks.push({tMs: Math.round(now()), x: r1(t.x * DSF), y: r1(t.y * DSF), button: 'left', kind: 'up'}); await rest(260); }
+  if (into) { const t = await target(into, atMs != null ? atMs - 1600 : undefined); await pointerTo(t, atMs != null ? atMs - 500 : undefined); await page.mouse.down(); inputChanged(); ev.clicks.push({tMs: Math.round(now()), x: r1(t.x * DSF), y: r1(t.y * DSF), button: 'left', kind: 'down'}); await rest(90); await page.mouse.up(); inputChanged(); ev.clicks.push({tMs: Math.round(now()), x: r1(t.x * DSF), y: r1(t.y * DSF), button: 'left', kind: 'up'}); await rest(260); }
   if (atMs != null) await restUntil(atMs);
   record('type', undefined, atMs, now(), {chars: text.length});
   for (const ch of text) {
     ev.keys.push({tMs: Math.round(now()), mods: []});
     await page.keyboard.type(ch);
+    inputChanged();
     await rest(rr(50, 105) + (/[ .,]/.test(ch) ? rr(0, 60) : 0));
   }
   await afterAction('type', a, false);
@@ -422,13 +478,16 @@ async function runAction(a) {
 // ---------------------------------------------------------------- the take
 const t00 = Date.now();
 log(`virtual-time capture: ${VW}x${VH} @${DSF}x, ${FPS} fps, ${IMG} frames${MOBILE ? ', phone' : ''}`);
+const endFirst = phase('capture.firstLoad');
 await page.goto(BASE, {waitUntil: 'commit', timeout: 45000});
 await settleDocument(Math.max(1800, script.settleMs ?? 0));
+endFirst();
 navStarted = false; docCommitted = false;
 if (MOBILE) { const got = await page.evaluate(() => innerWidth); if (got !== VW) log(`WARNING: the page lays out at ${got} CSS px wide (wanted ${VW})`); }
 await page.mouse.move(cx, cy); sentX = cx; sentY = cy;
 enc = startEncoder(path.join(outDir, 'recording.mp4'));
 capturing = true;
+const endTake = phase('capture.take');
 const scenes = [];
 let failed = null;
 try {
@@ -448,11 +507,18 @@ try {
 } catch (e) {
   failed = e;
   log(`FAILED in scene ${scenes.length + 1}: ${e.message}`);
-  try { fs.writeFileSync(path.join(outDir, 'failure.png'), await shot()); } catch {}
+  try { fs.writeFileSync(path.join(outDir, 'failure.png'), await shot('png')); } catch {}
 }
 capturing = false;
+endTake({frames, skipped, ...(VERIFY ? {verified, missed} : {})});
+log(`frames: ${frames - skipped} screenshots, ${skipped} repeated (nothing changed)${VERIFY ? `; verify: ${missed} of ${verified} skips would have been wrong` : ''}`);
+prof.flush('capture.');
+const endFlush = phase('capture.encoderFlush');
 const code = await enc.end();
+endFlush();
+const endShut = phase('capture.shutdown');
 await shutdown();
+endShut();
 if (code !== 0) die('ffmpeg could not encode the frames');
 
 const dur = Math.round(frames * DT);

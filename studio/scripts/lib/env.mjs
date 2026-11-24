@@ -21,8 +21,8 @@ export const studioDir = path.resolve(path.dirname(fileURLToPath(import.meta.url
  */
 export const QUALITY = {
   lite: {dsf: 1.5, spotlightScaleMax: 2, maxShort: 1080, remotionConcurrency: 1, spotlightConcurrency: 1, motionBlur: false, staticBackgrounds: true, nativeQuality: 0.62, x264: ['--crf=20', '--x264-preset=veryfast', '--offthreadvideo-cache-size-in-bytes=268435456', '--offthreadvideo-video-threads=1'], spotlightCrf: 19, capturePreset: 'veryfast', captureCrf: 17, encodeThreads: 2},
-  normal: {dsf: 2, spotlightScaleMax: 4, maxShort: 2160, remotionConcurrency: 3, spotlightConcurrency: 2, motionBlur: true, staticBackgrounds: false, nativeQuality: 0.72, x264: ['--crf=16'], spotlightCrf: 15, capturePreset: 'medium', captureCrf: 14, encodeThreads: 4},
-  max: {dsf: 2, spotlightScaleMax: 4, maxShort: 2160, remotionConcurrency: 6, spotlightConcurrency: 4, motionBlur: true, staticBackgrounds: false, nativeQuality: 0.85, x264: ['--crf=14'], spotlightCrf: 14, capturePreset: 'medium', captureCrf: 12, encodeThreads: 8},
+  normal: {dsf: 2, spotlightScaleMax: 4, maxShort: 2160, remotionConcurrency: 3, spotlightConcurrency: 2, motionBlur: true, staticBackgrounds: false, nativeQuality: 0.72, x264: ['--crf=16'], spotlightCrf: 15, capturePreset: 'veryfast', captureCrf: 12, encodeThreads: 4},
+  max: {dsf: 2, spotlightScaleMax: 4, maxShort: 2160, remotionConcurrency: 6, spotlightConcurrency: 4, motionBlur: true, staticBackgrounds: false, nativeQuality: 0.85, x264: ['--crf=14'], spotlightCrf: 14, capturePreset: 'veryfast', captureCrf: 10, encodeThreads: 8},
 };
 
 /** @returns {{mode: 'lite'|'normal'|'max', auto: boolean, why: string, q: typeof QUALITY.lite}} */

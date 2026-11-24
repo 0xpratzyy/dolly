@@ -16,6 +16,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {parseArgs, resolveRender} from './scripts/lib/render-args.mjs';
 import {browserArgs, capBundlerCache, dirSize, mb, withPrivateTemp} from './scripts/lib/env.mjs';
+import {phase, record} from './scripts/lib/profile.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -65,6 +66,7 @@ async function render() {
       const t0 = Date.now();
       const {prepareNative} = await import('./scripts/lib/render-prep.mjs');
       const {spec, timings} = await prepareNative({dir, ...rr, log: (m) => console.log(m)});
+      record('render.track', timings.trackMs); record('render.stills', timings.stillsMs, {drawn: timings.stillsRendered, cached: timings.stillsCached});
       if (spec.unsupported.length) why = `not in the native renderer yet: ${spec.unsupported.join(', ')}`;
       else {
         const specPath = path.join(dir, `.spec-${process.pid}.tmp`);
@@ -74,7 +76,9 @@ async function render() {
         if (!flags.bitrate) a.push('--quality', String(Number(flags.quality) > 0 ? flags.quality : quality.q.nativeQuality)); // a number is still taken as the encoder quality
         if (flags.stats) a.push('--stats');
         console.log(`render (native): ${out}`);
+        const endBin = phase('render.native');
         const res = spawnSync(bin, a, {stdio: 'inherit'});
+        endBin();
         fs.rmSync(specPath, {force: true});
         if (res.status !== 0) die('native render failed (try --engine remotion)');
         console.log(`rendered in ${((Date.now() - t0) / 1000).toFixed(1)} s (track ${timings.trackMs} ms, stills ${timings.stillsRendered} drawn / ${timings.stillsCached} cached in ${timings.stillsMs} ms); ${mb(dirSize(out))}`);
@@ -105,7 +109,9 @@ async function render() {
   if (flags.frames) args.push(`--frames=${flags.frames}`);
   console.log('render:', out);
   const t0 = Date.now();
+  const endRem = phase('render.remotion');
   const r = withPrivateTemp((env) => spawnSync('npx', args, {cwd: here, stdio: 'inherit', env}), !!flags.keep);
+  endRem();
   if (!flags.keep) { fs.rmSync(propsPath, {force: true}); fs.rmSync(pub, {recursive: true, force: true}); } // --keep leaves the temp files for debugging
   capBundlerCache();
   if (r.status !== 0) die('remotion render failed');

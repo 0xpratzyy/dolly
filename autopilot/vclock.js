@@ -44,8 +44,20 @@
   window.requestIdleCallback = (cb) => addTimer(() => cb({didTimeout: false, timeRemaining: () => 8}), 1, [], false);
   window.cancelIdleCallback = (id) => timers.delete(id);
 
+  // ---- "did anything visible change?" (smooth.mjs skips the screenshot of a frame where nothing did and repeats the last one).
+  // Conservative: any DOM mutation, an animation that moved, playing media, a canvas page running rAF, a load / scroll / font event.
+  let dirty = true;
+  let muts = 0; // mutation records so far: part of the frame fingerprint two capture workers compare (smooth.mjs --workers)
+  const mo = new MutationObserver((rs) => { dirty = true; muts += rs.length; });
+  const observe = () => { try { mo.observe(document, {subtree: true, childList: true, attributes: true, characterData: true}); } catch {} };
+  if (document.documentElement) observe(); else document.addEventListener('DOMContentLoaded', observe);
+  const touch = () => { dirty = true; };
+  for (const e of ['load', 'scroll', 'error', 'input', 'focus', 'blur', 'transitionrun', 'animationstart', 'toggle']) window.addEventListener(e, touch, true);
+  try { document.fonts && document.fonts.addEventListener('loadingdone', touch); } catch {}
+
   // ---- animations (CSS transitions, CSS animations, WAAPI): paused and seeked from the virtual clock
   const AM = new WeakMap();
+  const moved = new Set(); // animations that changed this step: they only count as a visible change when on screen (onScreen below)
   const live = new Set(); // animations still running (finite ones make the page "busy")
   const syncAnims = () => {
     let all;
@@ -65,9 +77,9 @@
       const rate = a.playbackRate || 1;
       const t = (vnow - r.t0) * rate;
       try {
-        if (rate > 0 && Number.isFinite(end) && t >= end) { a.currentTime = end; a.finish(); r.done = true; }
-        else if (rate < 0 && t <= 0) { a.currentTime = 0; a.finish(); r.done = true; }
-        else a.currentTime = Math.max(0, t);
+        if (rate > 0 && Number.isFinite(end) && t >= end) { a.currentTime = end; a.finish(); r.done = true; moved.add(a); }
+        else if (rate < 0 && t <= 0) { a.currentTime = 0; a.finish(); r.done = true; moved.add(a); }
+        else { const c = Math.max(0, t); if (r.last !== c) { r.last = c; moved.add(a); } a.currentTime = c; }
       } catch {}
     }
   };
@@ -85,6 +97,22 @@
   };
 
 
+  // An element counts as on screen if its box meets the viewport now or did at the last check (so leaving the screen is a change).
+  // Elements are only measured on a frame that is otherwise unchanged; a box that cannot be measured counts as on screen.
+  const seen = new WeakMap(); // element -> was on screen at the last check
+  const onScreen = (el) => {
+    if (!el || !el.getBoundingClientRect) return true;
+    let vis = true;
+    try { const b = el.getBoundingClientRect(); vis = b.right > 0 && b.bottom > 0 && b.left < innerWidth && b.top < innerHeight && (b.width > 0 || b.height > 0); } catch {}
+    const was = seen.get(el);
+    seen.set(el, vis);
+    return vis || was !== false;
+  };
+
+  const inView = (el) => {
+    try { const b = el.getBoundingClientRect(); return b.right > 0 && b.bottom > 0 && b.left < innerWidth && b.top < innerHeight && b.width > 0 && b.height > 0; } catch { return true; }
+  };
+
   // ---- media: a playing <video>/<audio> is paused for real and seeked to the virtual time on every step
   const MS = new WeakMap();
   const media = new Set();
@@ -94,7 +122,7 @@
   if (HME) {
     realPlay = HME.play; realPause = HME.pause;
     pausedGet = Object.getOwnPropertyDescriptor(HME, 'paused').get;
-    const start = (el) => { const s = st(el); s.playing = true; s.t0 = vnow - (el.currentTime * 1000) / (el.playbackRate || 1); s.last = el.currentTime; media.add(el); };
+    const start = (el) => { const s = st(el); s.playing = true; s.t0 = vnow - (el.currentTime * 1000) / (el.playbackRate || 1); s.last = s.applied = el.currentTime; media.add(el); };
     HME.play = function () {
       if (!st(this).playing) { start(this); try { this.dispatchEvent(new Event('play')); this.dispatchEvent(new Event('playing')); } catch {} }
       return Promise.resolve();
@@ -119,25 +147,34 @@
       if (!el.isConnected) { media.delete(el); continue; }
       if (!s.playing) continue;
       const rate = el.playbackRate || 1, dur = el.duration;
-      if (Math.abs(el.currentTime - s.last) > 0.08) s.t0 = vnow - (el.currentTime * 1000) / rate; // the page seeked it
+      if (Math.abs(el.currentTime - (s.applied ?? s.last)) > 0.08) s.t0 = vnow - (el.currentTime * 1000) / rate; // the page seeked it
       let t = ((vnow - s.t0) / 1000) * rate;
       if (Number.isFinite(dur) && dur > 0) {
         if (el.loop) t %= dur;
         else if (t >= dur) { t = dur; s.playing = false; try { el.dispatchEvent(new Event('ended')); } catch {} }
       }
-      if (Math.abs(el.currentTime - t) > 0.004) { try { el.currentTime = t; seeking.push(el); } catch {} }
+      // A video off screen is not seeked (a seek decodes a frame: ~8 ms a step); it catches up when it comes back into view. Audio is
+      // seeked but never waited for: it is not recorded.
+      const isVideo = el.tagName === 'VIDEO';
+      if (isVideo && !inView(el)) { s.last = t; try { el.dispatchEvent(new Event('timeupdate')); } catch {} continue; }
+      if (Math.abs(el.currentTime - t) > 0.004) { try { el.currentTime = t; s.applied = t; if (isVideo) seeking.push(el); } catch {} }
       s.last = t;
       try { el.dispatchEvent(new Event('timeupdate')); } catch {}
     }
     return seeking;
   };
+  // wait for every seeked element's frame: woken by its 'seeked' / 'loadeddata' event (polling every 4 ms cost ~10 ms a step on a page
+  // with one playing video), at most 400 ms
+  const ready = (el) => !el.seeking && el.readyState >= 2;
   const mediaReady = (els) => new Promise((res) => {
-    const t0 = realNow();
-    const tick = () => {
-      if (els.every((el) => !el.seeking && el.readyState >= 2) || realNow() - t0 > 400) return res();
-      realSetTimeout(tick, 4);
-    };
-    tick();
+    let left = els.filter((el) => !ready(el));
+    if (!left.length) return res();
+    let over = false;
+    const finish = () => { if (over) return; over = true; for (const el of els) for (const e of ['seeked', 'loadeddata', 'canplay', 'error']) el.removeEventListener(e, check); res(); };
+    const check = () => { left = left.filter((el) => !ready(el)); if (!left.length) finish(); };
+    for (const el of left) for (const e of ['seeked', 'loadeddata', 'canplay', 'error']) el.addEventListener(e, check);
+    realSetTimeout(finish, 400);
+    check();
   });
 
   const style = document.createElement('style');
@@ -156,10 +193,17 @@
       syncAnims();
       const q = rafQ; rafQ = [];
       for (const r of q) { try { r.cb(vnow); } catch (e) { console.error('[vt raf]', e); } }
+      if (q.length && document.querySelector('canvas')) dirty = true; // a canvas drawn from rAF changes no DOM
       syncAnims();
       const seeking = syncMedia();
       if (seeking.length) await mediaReady(seeking);
-      return {vnow, busy: this.busy()};
+      { const rs = mo.takeRecords(); if (rs.length) { dirty = true; muts += rs.length; } }
+      if (!dirty) for (const el of media) if (st(el).playing && el.tagName === 'VIDEO' && onScreen(el)) { dirty = true; break; }
+      if (!dirty) for (const a of moved) { let el = null; try { el = a.effect && a.effect.target; } catch {} if (onScreen(el)) { dirty = true; break; } }
+      moved.clear();
+      const changed = dirty;
+      dirty = false;
+      return {vnow, busy: this.busy(), changed, fp: `${muts}/${Math.round(scrollX)},${Math.round(scrollY)}/${live.size}/${location.pathname.length}`};
     },
     /** Call at an action: from now on `busy` means "an animation that this action started is still running". */
     mark() { markT = vnow; },

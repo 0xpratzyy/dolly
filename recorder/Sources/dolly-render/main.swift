@@ -83,6 +83,19 @@ do {
 
     let canvas = CGRect(x: 0, y: 0, width: spec.width, height: spec.height)
     var renderSeconds = 0.0
+    // Frames are composited asynchronously, up to `depth` in flight: the GPU draws frame i+1 while the encoder takes frame i and
+    // the CPU builds frame i+2 (synchronous render() left the GPU idle while waiting: 2.1 s -> see --stats).
+    let depth = 3
+    var inflight: [(task: CIRenderTask, pb: CVPixelBuffer, fi: Int)] = []
+    func drain(to count: Int) throws {
+        while inflight.count > count {
+            let f = inflight.removeFirst()
+            let r0 = CFAbsoluteTimeGetCurrent()
+            _ = try f.task.waitUntilCompleted()
+            renderSeconds += CFAbsoluteTimeGetCurrent() - r0
+            try enc.append(f.pb, frame: f.fi)
+        }
+    }
     let t2 = CFAbsoluteTimeGetCurrent()
     for fi in 0..<n {
         try autoreleasepool {
@@ -103,13 +116,14 @@ do {
             let face = faceSource?.image(at: Double(fi) * 1000 / spec.fps + (spec.facecam?.startMs ?? 0), drop: true)
             let img = comp.frame(fi, video: video, cover: cover, face: face)
             let pb = try enc.newBuffer()
-            let r0 = CFAbsoluteTimeGetCurrent()
-            comp.context.render(img, to: pb, bounds: canvas, colorSpace: nil)
-            renderSeconds += CFAbsoluteTimeGetCurrent() - r0
-            try enc.append(pb, frame: fi)
+            let dest = CIRenderDestination(pixelBuffer: pb)
+            dest.colorSpace = nil
+            inflight.append((try comp.context.startTask(toRender: img, from: canvas, to: dest, at: .zero), pb, fi))
+            try drain(to: depth - 1)
             for (ci, last) in coverLast where last == fi { coverImage[ci] = nil }
         }
     }
+    try drain(to: 0)
     let loopSeconds = CFAbsoluteTimeGetCurrent() - t2
     source.cancel()
     faceSource?.cancel()
@@ -125,7 +139,7 @@ do {
     print("rendered \(outPath): \(n) frames \(spec.width)x\(spec.height)@\(Int(spec.fps.rounded())) in \(f1(total)) s (\(Int((Double(n) / max(0.001, loopSeconds + finishSeconds)).rounded())) fps), \(f1(size / 1_048_576)) MB, peak memory \(Int(Double(ru.ru_maxrss) / 1_048_576)) MB")
     if flags["stats"] != nil {
         let cpu = Double(ru.ru_utime.tv_sec) + Double(ru.ru_utime.tv_usec) / 1e6 + Double(ru.ru_stime.tv_sec) + Double(ru.ru_stime.tv_usec) / 1e6
-        print("  prepare \(f1(prepSeconds)) s, setup \(f1(setupSeconds)) s, frames \(f1(loopSeconds)) s (decode \(f1(source.decodeSeconds)), composite \(f1(renderSeconds)), waiting for the encoder \(f1(enc.waitSeconds))), finish \(f1(finishSeconds)) s")
+        print("  prepare \(f1(prepSeconds)) s, setup \(f1(setupSeconds)) s, frames \(f1(loopSeconds)) s (decode \(f1(source.decodeSeconds)), waiting for the GPU \(f1(renderSeconds)), waiting for the encoder \(f1(enc.waitSeconds))), finish \(f1(finishSeconds)) s")
         print("  decoded \(source.decoded) frames, blended \(source.blended); cpu time \(f1(cpu)) s (\(Int((100 * cpu / max(0.001, total)).rounded())) % of one core)")
     }
 } catch {

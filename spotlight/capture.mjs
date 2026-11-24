@@ -11,6 +11,7 @@
 //        --exact (use the matched element itself, no climbing to a container)   --hide "sel,sel"   --fps 60 (default)
 // actions.json: see spotlight/README.md (hover, click, type, press, select, drag, slide, swipe, scroll, wait, move, state).
 import fs from 'node:fs';
+import {spawn} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
@@ -34,7 +35,9 @@ const FPS = Number(flags.fps ?? 60);
 const DT = 1000 / FPS;
 const [VW, VH] = (flags.viewport ?? '1440x900').split('x').map(Number);
 const {resolveQuality, dirSize, mb} = await import(pathToFileURL(path.join(here, '../studio/scripts/lib/env.mjs')).href);
-const QUALITY = resolveQuality(flags.quality); // lite caps the capture scale at 2x (docs/performance.md)
+const QUALITY = resolveQuality(flags.quality);
+const {phase, accumulator} = await import(pathToFileURL(path.join(here, '../studio/scripts/lib/profile.mjs')).href);
+const prof = accumulator(); // per-frame sums for DOLLY_PROFILE (studio/scripts/lib/profile.mjs) // lite caps the capture scale at 2x (docs/performance.md)
 let SCALE = Number(flags.scale ?? 2); // without --scale it is raised after the measuring pass so a small component stays crisp as a big hero
 const PAD = Number(flags.pad ?? 130);
 const LEAD = Number(flags.lead ?? 500), TAIL = Number(flags.tail ?? 900);
@@ -50,6 +53,18 @@ const rnd = () => { rs = (rs + 0x6d2b79f5) | 0; let t = Math.imul(rs ^ (rs >>> 1
 const rr = (a, b) => a + rnd() * (b - a);
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+
+/** VP9 alpha WebM encoder fed with PNG frames on stdin (same settings as the encode after the take used). Resolves true on success. */
+function startWebm(file) {
+  const proc = spawn('ffmpeg', ['-v', 'error', '-y', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'png', '-i', '-', '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-crf', '18', '-b:v', '0',
+    '-row-mt', '1', '-cpu-used', '4', '-threads', String(Number(flags['encode-threads'] ?? QUALITY.q.encodeThreads)), '-g', String(FPS * 2), file], {stdio: ['pipe', 'inherit', 'inherit']});
+  const exited = new Promise((res) => { proc.on('exit', (c) => res(c === 0)); proc.on('error', () => res(false)); });
+  proc.stdin.on('error', () => {});
+  return {
+    async write(buf) { if (!proc.stdin.write(buf)) await new Promise((r) => proc.stdin.once('drain', r)); },
+    async end() { proc.stdin.end(); return exited; },
+  };
+}
 
 /** One full pass: run the whole script; capture=false only measures (finds the union of everything that is ever painted). */
 async function pass(browser, capture, clip) {
@@ -90,15 +105,23 @@ async function pass(browser, capture, clip) {
   let ck = 'arrow', prevSample = null, hitLabelPrev = '', hidden = false;
   let pressed = false;
   const writes = [];
-  if (capture) fs.mkdirSync(path.join(out, 'frames'), {recursive: true});
+  // frames go straight into the VP9 encoder while the take runs (the encode used to start after it: 11.6 s of 55 s);
+  // --keep-frames writes the PNG sequence instead, as before
+  const stream = capture && flags['keep-frames'] !== 'true' ? startWebm(path.join(out, 'frames.webm')) : null;
+  if (capture && !stream) fs.mkdirSync(path.join(out, 'frames'), {recursive: true});
   await page.mouse.move(cx, cy);
+  let mx = cx, my = cy;
 
   const tNow = () => rec.frames * DT;
   /** One output frame: apply the cursor, advance virtual time, sample, (capture). */
   const frame = async () => {
-    await page.mouse.move(cx, cy);
+    let tp = performance.now();
+    if (cx !== mx || cy !== my) { await page.mouse.move(cx, cy); mx = cx; my = cy; } // an unchanged pointer needs no event (each one waits ~7-14 ms for a frame)
+    prof.add('mouse', performance.now() - tp); tp = performance.now();
     await page.evaluate((d) => window.__sp.step(d), DT);
+    prof.add('step', performance.now() - tp); tp = performance.now();
     const s = await page.evaluate(([x, y]) => window.__sp.sample(x, y), [cx, cy]);
+    prof.add('sample', performance.now() - tp);
     const t = tNow();
     // sound / state hints from state changes
     if (prevSample) {
@@ -119,9 +142,12 @@ async function pass(browser, capture, clip) {
       // clip.scale must carry the device scale: with a clip, CDP returns CSS-pixel-sized images whatever the context's deviceScaleFactor
       // (every capture before this fix was 1x, labelled 2x, and was upscaled by the renderer: soft text)
       const n = String(rec.frames + 1).padStart(5, '0');
-      const r = await cdp.send('Page.captureScreenshot', {format: 'png', clip: {x: clip.x + s.sx, y: clip.y + s.sy, width: clip.width, height: clip.height, scale: SCALE}, fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true});
-      writes.push(fs.promises.writeFile(path.join(out, 'frames', `${n}.png`), Buffer.from(r.data, 'base64')));
-      if (writes.length > 24) await Promise.all(writes.splice(0, 12));
+      const r = await prof.time('shot', cdp.send('Page.captureScreenshot', {format: 'png', clip: {x: clip.x + s.sx, y: clip.y + s.sy, width: clip.width, height: clip.height, scale: SCALE}, fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true}));
+      if (stream) await prof.time('encode', stream.write(Buffer.from(r.data, 'base64')));
+      else {
+        writes.push(fs.promises.writeFile(path.join(out, 'frames', `${n}.png`), Buffer.from(r.data, 'base64')));
+        if (writes.length > 24) await Promise.all(writes.splice(0, 12));
+      }
     }
     rec.frames++;
   };
@@ -252,6 +278,7 @@ async function pass(browser, capture, clip) {
   for (const a of actions) await runAction(a);
   await rest(TAIL);
   if (writes.length) await Promise.all(writes);
+  if (stream) { const endE = phase('spotlight.encodeFlush'); rec.webm = await stream.end(); endE(); }
   const theme = await page.evaluate(() => {
     const el = window.__spRoot; const c = getComputedStyle(el).backgroundColor; const m = /rgba?\(([^)]+)\)/.exec(c);
     let lum = null; if (m) { const p = m[1].split(/[ ,/]+/).filter(Boolean).map(parseFloat); if ((p.length < 4 || p[3] > 0.3)) lum = (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) / 255; }
@@ -267,7 +294,9 @@ const killBrowser = async () => { try { await browser.close(); } catch {} };
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => { await killBrowser(); process.exit(130); });
 try {
   log('pass 1: measuring');
+  let endP = phase('spotlight.pass1');
   const m = await pass(browser, false, null);
+  endP(); prof.flush('spotlight.pass1.');
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const b of m.rec.bbox) if (b) { x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[0] + b[2]); y1 = Math.max(y1, b[1] + b[3]); }
   if (!(x1 > x0)) die('nothing visible was measured for that target');
@@ -276,7 +305,9 @@ try {
   if (!flags.scale) SCALE = Math.max(2, Math.min(QUALITY.q.spotlightScaleMax, Math.ceil(1400 / Math.max(1, x1 - x0)))); // the hero is drawn up to ~1400 px wide at 1080p
   log(`target ${m.info.tag}: ${m.rec.frames} frames (${(m.rec.frames / FPS).toFixed(1)} s), clip ${clip.width}x${clip.height} @${SCALE}x`);
   log('pass 2: capturing');
+  endP = phase('spotlight.pass2');
   const c = await pass(browser, true, clip);
+  endP({frames: c.rec.frames}); prof.flush('spotlight.pass2.');
   const rec = c.rec;
   const rel = (x, y) => [+(x - clip.x).toFixed(2), +(y - clip.y).toFixed(2)];
   const spot = {
@@ -296,12 +327,18 @@ try {
     keys: rec.keys, states: rec.states, sounds: rec.sounds,
   };
   // the frames as ONE alpha video (VP9 WebM, about 1 % of the PNGs' size); the PNG sequence is deleted unless --keep-frames
-  if (flags['keep-frames'] !== 'true') {
+  if (rec.webm) {
+    spot.image.video = 'frames.webm';
+    log(`frames.webm: ${(fs.statSync(path.join(out, 'frames.webm')).size / 1e6).toFixed(1)} MB (encoded while capturing)`);
+  } else if (rec.webm === false) die('could not encode frames.webm (ffmpeg with libvpx-vp9 needed); run again with --keep-frames to keep PNG frames');
+  else if (flags['keep-frames'] !== 'true') {
     const {spawnSync} = await import('node:child_process');
     const webm = path.join(out, 'frames.webm');
     const pngBytes = fs.readdirSync(path.join(out, 'frames')).reduce((a, f) => a + fs.statSync(path.join(out, 'frames', f)).size, 0);
+    const endE = phase('spotlight.encodeWebm');
     const r = spawnSync('ffmpeg', ['-v', 'error', '-y', '-framerate', String(FPS), '-i', path.join(out, 'frames', '%05d.png'), '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-crf', '18', '-b:v', '0',
       '-row-mt', '1', '-cpu-used', '4', '-threads', String(Number(flags['encode-threads'] ?? QUALITY.q.encodeThreads)), '-g', String(FPS * 2), webm], {stdio: ['ignore', 'inherit', 'inherit']});
+    endE();
     if (r.status === 0 && fs.existsSync(webm)) {
       spot.image.video = 'frames.webm';
       fs.rmSync(path.join(out, 'frames'), {recursive: true, force: true});

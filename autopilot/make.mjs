@@ -12,7 +12,7 @@
 //   mobile/ (the phone take: recording, events, scenes, plan, captions)
 import fs from 'node:fs';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -26,14 +26,27 @@ for (let i = 0; i < argv.length; i++) {
   else if (a.startsWith('--')) flags[a.slice(2)] = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : 'true';
   else pos.push(a);
 }
-const die = (m) => { console.error(m); process.exit(1); };
+const kids = new Set(); // children still running (two may overlap): stopped when the run fails or is interrupted
+const die = (m) => { console.error(m); for (const k of kids) try { k.kill('SIGTERM'); } catch {} process.exit(1); };
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { for (const k of kids) try { k.kill(sig); } catch {} process.exit(130); });
 const polish = flags.polish && path.resolve(flags.polish);
 const dir = path.resolve(polish ?? flags.out ?? '');
 if (!polish && (!pos[0] || !flags.out)) die('usage: node make.mjs <script.json> --out <dir> [--style ..] [--set a.b=v]   |   node make.mjs --polish <dir>');
-const run = (cmd, args, opt = {}) => {
-  const r = spawnSync(cmd, args, {stdio: 'inherit', ...opt});
-  if (r.status !== 0) die(`${cmd} ${args.slice(0, 2).join(' ')} failed (${r.status})`);
-};
+// --profile (or DOLLY_PROFILE=1): time every phase of every step and write <dir>/profile.json (see studio/scripts/lib/profile.mjs)
+const PROFILE = flags.profile === 'true' || process.env.DOLLY_PROFILE === '1';
+const profFile = path.join(dir, '.profile.jsonl');
+if (PROFILE) { fs.mkdirSync(dir, {recursive: true}); fs.rmSync(profFile, {force: true}); process.env.DOLLY_PROFILE = profFile; }
+else if (process.env.DOLLY_PROFILE === '1') delete process.env.DOLLY_PROFILE;
+const prof = await import(path.join(studio, 'scripts/lib/profile.mjs'));
+const tRun = Date.now();
+const mem = PROFILE ? prof.treeMemory() : null;
+/** Run a child to the end (async, so the memory sampler and overlapping steps keep going); `name` is its profile phase. */
+const run = (cmd, args, opt = {}, name = `${path.basename(args[0] ?? cmd)} ${args[1] ?? ''}`.trim()) => new Promise((res) => {
+  const end = prof.phase(`step.${name}`);
+  const child = spawn(cmd, args, {stdio: 'inherit', ...opt});
+  kids.add(child);
+  child.on('exit', (code) => { kids.delete(child); end(); if (code !== 0) die(`${cmd} ${args.slice(0, 2).join(' ')} failed (${code})`); res(); });
+});
 const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 const {resolveQuality, dirSize, mb} = await import(path.join(studio, 'scripts/lib/env.mjs'));
 const quality = resolveQuality(flags.quality); // lite | normal | max, auto from this machine (docs/performance.md); handed to the capture and the render
@@ -48,9 +61,19 @@ const driveArgs = (out, extra = []) => {
   return a;
 };
 const mobileDir = path.join(dir, 'mobile');
+// normal / max: the phone take runs next to the desktop take, and each take goes on to its plan and render as soon as it is
+// recorded (two jobs at most, measured in docs/performance.md "Speed pass"). lite keeps every step one after the other. Only smooth
+// (virtual-time, headless) takes can overlap: a window capture records a real window on screen.
+const scriptJson = polish ? {} : readJson(path.resolve(pos[0]));
+const smoothTake = !polish && ['auto', 'smooth', undefined].includes(flags.capture ?? scriptJson.capture) && (scriptJson.paced !== true || (flags.capture ?? scriptJson.capture) === 'smooth');
+const overlap = quality.mode !== 'lite' && smoothTake && vmode === 'mobile' && flags.sequential !== 'true';
+const takeDesktop = () => run('node', driveArgs(dir, flags.viewport ? ['--viewport', flags.viewport] : []), {}, 'take.desktop');
+const takePhone = () => run('node', driveArgs(mobileDir, ['--mobile', ...(flags['mobile-viewport'] ? ['--viewport', flags['mobile-viewport']] : [])]), {}, 'take.phone');
+let phoneTake = Promise.resolve();
 if (!polish) {
-  run('node', driveArgs(dir, flags.viewport ? ['--viewport', flags.viewport] : []));
-  if (vmode === 'mobile') run('node', driveArgs(mobileDir, ['--mobile', ...(flags['mobile-viewport'] ? ['--viewport', flags['mobile-viewport']] : [])]));
+  if (overlap) { console.log('overlap: the phone take records next to the desktop take'); phoneTake = takePhone(); }
+  await takeDesktop();
+  if (vmode === 'mobile' && !overlap) await takePhone();
 }
 const recFile = fs.readdirSync(dir).find((f) => /^recording\.(mp4|mov)$/.test(f));
 if (!recFile || !fs.existsSync(path.join(dir, 'events.json'))) die(`${dir} needs recording.mp4|mov and events.json`);
@@ -74,7 +97,7 @@ for (const s of sets) {
 /** plan + captions for one take folder. Captions: one line per scene narration, timed to the scene's span in OUTPUT time: we map
  *  recording time -> output time with the studio's own timeline (mapTime), so idle speed-up and cuts are accounted for. */
 async function prepare(d) {
-  if (!fs.existsSync(path.join(d, 'plan.json')) || !polish) run('node', [path.join(studio, 'dolly.mjs'), 'plan', d]);
+  if (!fs.existsSync(path.join(d, 'plan.json')) || !polish) await run('node', [path.join(studio, 'dolly.mjs'), 'plan', d], {}, `plan.${path.basename(d)}`);
   const plan = readJson(path.join(d, 'plan.json'));
   const style = mergeStyle(defaultStyle, plan.style, preset, over);
   const fps = plan.source.fps;
@@ -107,35 +130,52 @@ async function prepare(d) {
 
 const dollyJs = path.join(studio, 'dolly.mjs');
 const sheet = (d, file, name, times) => {
-  const tmp = path.join(dir, '.sheet-tmp');
+  const end = prof.phase(`step.sheet.${name}`);
+  const tmp = path.join(dir, `.sheet-tmp-${name}`);
   fs.mkdirSync(tmp, {recursive: true});
   fs.copyFileSync(path.join(d, file), path.join(tmp, 'out.mp4'));
   spawnSync('sh', [path.join(studio, 'scripts/sheet.sh'), tmp, ...times], {stdio: 'inherit'});
   fs.renameSync(path.join(tmp, 'sheet.jpg'), path.join(dir, name));
   fs.rmSync(tmp, {recursive: true, force: true});
+  end();
 };
 
 // 2-3. desktop take: plan, captions, 16:9 render, sheet
-const main = await prepare(dir);
-run('node', [dollyJs, 'render', dir, ...styleArgs, ...main.capArgs, '--out', path.join(dir, 'out.mp4')]);
-sheet(dir, 'out.mp4', 'sheet.jpg', main.times);
-
-// 4. the 9:16 cut
 const outs = [path.join(dir, 'out.mp4')];
-if (vmode === 'mobile' && fs.existsSync(path.join(mobileDir, 'events.json'))) {
+const desktopChain = async () => {
+  const main = await prepare(dir);
+  await run('node', [dollyJs, 'render', dir, ...styleArgs, ...main.capArgs, '--out', path.join(dir, 'out.mp4')], {}, 'render.16x9');
+  sheet(dir, 'out.mp4', 'sheet.jpg', main.times);
+  return main;
+};
+// 4. the 9:16 cut
+const phoneChain = async () => {
+  await phoneTake;
+  if (!fs.existsSync(path.join(mobileDir, 'events.json'))) return false;
   const mob = await prepare(mobileDir);
   // the phone take already is 9:16: full frame, no padding or chrome, no synthetic cursor (a finger has none); the click ripple is the tap
   const phone = ['--set', 'aspect=9:16', '--set', 'fit=crop', '--set', 'padding=0', '--set', 'radius=0', '--set', 'shadow=0', '--set', 'frame=none',
     '--set', 'cursor.visible=false', '--set', 'zoom.auto=false']; // no auto zoom: a portrait page filling the frame would pan sideways and clip text
-  run('node', [dollyJs, 'render', mobileDir, ...phone, ...styleArgs, ...mob.capArgs, '--out', path.join(dir, 'vertical.mp4')]);
+  await run('node', [dollyJs, 'render', mobileDir, ...phone, ...styleArgs, ...mob.capArgs, '--out', path.join(dir, 'vertical.mp4')], {}, 'render.9x16');
   sheet(dir, 'vertical.mp4', 'vertical-sheet.jpg', mob.times);
-  outs.push(path.join(dir, 'vertical.mp4'));
-} else if (vmode === 'letterbox' || vmode === 'mobile') {
+  return true;
+};
+let main, phoneDone = false;
+if (vmode === 'mobile' && overlap) [main, phoneDone] = await Promise.all([desktopChain(), phoneChain()]);
+else { main = await desktopChain(); if (vmode === 'mobile') phoneDone = await phoneChain(); }
+if (phoneDone) outs.push(path.join(dir, 'vertical.mp4'));
+else if (vmode === 'letterbox' || vmode === 'mobile') {
   // letterboxed desktop take: the whole page stays in view (text is never cut off), but the picture is a small strip in the frame
   const lb = ['--set', 'aspect=9:16', '--set', 'fit=letterbox', '--set', 'padding=3', '--set', 'zoom.amount=0.9'];
-  run('node', [dollyJs, 'render', dir, ...lb, ...styleArgs, ...main.capArgs, '--out', path.join(dir, 'vertical.mp4')]);
+  await run('node', [dollyJs, 'render', dir, ...lb, ...styleArgs, ...main.capArgs, '--out', path.join(dir, 'vertical.mp4')], {}, 'render.9x16');
   sheet(dir, 'vertical.mp4', 'vertical-sheet.jpg', main.times);
   outs.push(path.join(dir, 'vertical.mp4'));
 }
 console.log(`disk: ${mb(dirSize(dir))} in ${dir}`);
+if (PROFILE) {
+  const json = prof.writeProfile(profFile, path.join(dir, 'profile.json'), {totalMs: Date.now() - tRun, peakRss: mem.stop(), meta: {command: 'make', quality: quality.mode, script: pos[0] ?? null, date: new Date().toISOString()}});
+  fs.rmSync(profFile, {force: true});
+  prof.printProfile(json);
+  console.log(`profile: ${path.join(dir, 'profile.json')}`);
+}
 console.log(`\ndone: ${outs.join(', ')}\nsheet(s): ${path.join(dir, 'sheet.jpg')}${outs.length > 1 ? ', ' + path.join(dir, 'vertical-sheet.jpg') : ''}. LOOK at them before handing over.`);
