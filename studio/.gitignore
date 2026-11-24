@@ -1,0 +1,9 @@
+node_modules/
+demo/*/recording.*
+demo/*/out.mp4
+demo/*/frames/
+*.tmp
+.remotion/
+build/
+.public-*/
+.cache/

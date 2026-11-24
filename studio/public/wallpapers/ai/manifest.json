@@ -1,0 +1,122 @@
+[
+ {
+  "id": "ai-alpine-dawn",
+  "name": "Alpine dawn",
+  "file": "wallpapers/ai/alpine-dawn.jpg",
+  "thumb": "wallpapers/ai/thumbs/alpine-dawn.jpg",
+  "tone": "light",
+  "width": 2560,
+  "height": 1440,
+  "source": "AI-generated with OpenAI image generation via Codex, 2026-11-22; original, no third-party assets"
+ },
+ {
+  "id": "ai-cloud-sea",
+  "name": "Sea of clouds",
+  "file": "wallpapers/ai/cloud-sea.jpg",
+  "thumb": "wallpapers/ai/thumbs/cloud-sea.jpg",
+  "tone": "light",
+  "width": 2560,
+  "height": 1440,
+  "source": "AI-generated with OpenAI image generation via Codex, 2026-11-22; original, no third-party assets"
+ },
+ {
+  "id": "ai-coast-golden",
+  "name": "Golden coast",
+  "file": "wallpapers/ai/coast-golden.jpg",
+  "thumb": "wallpapers/ai/thumbs/coast-golden.jpg",
+  "tone": "light",
+  "width": 2560,
+  "height": 1440,
+  "source": "AI-generated with OpenAI image generation via Codex, 2026-11-22; original, no third-party assets"
+ },
+ {
+  "id": "ai-curtain-light",
+  "name": "Curtain light",
+  "file": "wallpapers/ai/curtain-light.jpg",
+  "thumb": "wallpapers/ai/thumbs/curtain-light.jpg",
+  "tone": "dark",
+  "width": 2560,
+  "height": 1440,
+  "source": "AI-generated with OpenAI image generation via Codex, 2026-11-22; original, no third-party assets"
+ },
+ {
+  "id": "ai-desert-stars",
+  "name": "Desert stars",
+  "file": "wallpapers/ai/desert-stars.jpg",
+  "thumb": "wallpapers/ai/thumbs/desert-stars.jpg",
+  "tone": "dark",
+  "width": 2560,
+  "height": 1440,
+  "source": "AI-generated with OpenAI image generation via Codex, 2026-11-22; original, no third-party assets"
+ },
+ {
+  "id": "ai-dunes-bluehour",
+  "name": "Blue-hour dunes",
+  "file": "wallpapers/ai/dunes-bluehour.jpg",
+  "thumb": "wallpapers/ai/thumbs/dunes-bluehour.jpg",
+  "tone": "light",
+  "width": 2560,
+  "height": 1440,
+  "source": "AI-generated with OpenAI image generation via Codex, 2026-11-22; original, no third-party assets"
+ },
+ {
+  "id": "ai-forest-fog",
+  "name": "Forest fog",
+  "file": "wallpapers/ai/forest-fog.jpg",
+  "thumb": "wallpapers/ai/thumbs/forest-fog.jpg",
+  "tone": "light",
+  "width": 2560,
+  "height": 1440,
+  "source": "AI-generated with OpenAI image generation via Codex, 2026-11-22; original, no third-party assets"
+ },
+ {
+  "id": "ai-glass-graphite",
+  "name": "Glass graphite",
+  "file": "wallpapers/ai/glass-graphite.jpg",
+  "thumb": "wallpapers/ai/thumbs/glass-graphite.jpg",
+  "tone": "dark",
+  "width": 2560,
+  "height": 1440,
+  "source": "AI-generated with OpenAI image generation via Codex, 2026-11-22; original, no third-party assets"
+ },
+ {
+  "id": "ai-hills-golden",
+  "name": "Golden meadow",
+  "file": "wallpapers/ai/hills-golden.jpg",
+  "thumb": "wallpapers/ai/thumbs/hills-golden.jpg",
+  "tone": "light",
+  "width": 2560,
+  "height": 1440,
+  "source": "AI-generated with OpenAI image generation via Codex, 2026-11-22; original, no third-party assets"
+ },
+ {
+  "id": "ai-ocean-pastel",
+  "name": "Pastel ocean",
+  "file": "wallpapers/ai/ocean-pastel.jpg",
+  "thumb": "wallpapers/ai/thumbs/ocean-pastel.jpg",
+  "tone": "light",
+  "width": 2560,
+  "height": 1440,
+  "source": "AI-generated with OpenAI image generation via Codex, 2026-11-22; original, no third-party assets"
+ },
+ {
+  "id": "ai-paper-window",
+  "name": "Paper light",
+  "file": "wallpapers/ai/paper-window.jpg",
+  "thumb": "wallpapers/ai/thumbs/paper-window.jpg",
+  "tone": "light",
+  "width": 2560,
+  "height": 1440,
+  "source": "AI-generated with OpenAI image generation via Codex, 2026-11-22; original, no third-party assets"
+ },
+ {
+  "id": "ai-silk-night",
+  "name": "Night silk",
+  "file": "wallpapers/ai/silk-night.jpg",
+  "thumb": "wallpapers/ai/thumbs/silk-night.jpg",
+  "tone": "dark",
+  "width": 2560,
+  "height": 1440,
+  "source": "AI-generated with OpenAI image generation via Codex, 2026-11-22; original, no third-party assets"
+ }
+]

@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"], "module": "ESNext", "moduleResolution": "bundler",
+    "jsx": "react-jsx", "strict": true, "noEmit": true, "skipLibCheck": true, "resolveJsonModule": true,
+    "allowImportingTsExtensions": true, "isolatedModules": true, "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@studio/*": ["../studio/src/*"], "@subtle/*": ["../studio/vendor/subtle/template/src/*"], "@subtle-styles/*": ["../studio/vendor/subtle/styles/*"], "@demo/*": ["../studio/demo/refs-tour/*"],
+      "react": ["node_modules/@types/react"], "react/*": ["node_modules/@types/react/*"],
+      "remotion": ["node_modules/remotion"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "dolly-autopilot",
+  "private": true,
+  "type": "module",
+  "description": "Dolly autopilot: drives a browser through a script.json, records it, and hands recording.mp4 + events.json to the studio.",
+  "scripts": {
+    "drive": "node drive.mjs",
+    "make": "node make.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.65.1"
+  }
+}

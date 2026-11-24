@@ -1,0 +1,13 @@
+{
+  // Dev copy of the Dolly site for review before anything goes live. workers_dev only: no routes, no custom domain.
+  "name": "dolly-site-dev",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/demo/*", "/spot/*", "/narrate/*", "/hero/*", "/ingest/*"]
+  }
+}

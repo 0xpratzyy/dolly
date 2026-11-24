@@ -1,0 +1,233 @@
+{
+ "durationMs": 15567,
+ "words": [
+  {
+   "t": "This",
+   "s": 0,
+   "e": 180
+  },
+  {
+   "t": "is",
+   "s": 180,
+   "e": 340
+  },
+  {
+   "t": "Refs.",
+   "s": 340,
+   "e": 740
+  },
+  {
+   "t": "Every",
+   "s": 1000,
+   "e": 1500
+  },
+  {
+   "t": "launch",
+   "s": 1500,
+   "e": 1800
+  },
+  {
+   "t": "film",
+   "s": 1800,
+   "e": 2080
+  },
+  {
+   "t": "is",
+   "s": 2080,
+   "e": 2260
+  },
+  {
+   "t": "broken",
+   "s": 2260,
+   "e": 2600
+  },
+  {
+   "t": "down,",
+   "s": 2600,
+   "e": 2960
+  },
+  {
+   "t": "shot",
+   "s": 3200,
+   "e": 3560
+  },
+  {
+   "t": "by",
+   "s": 3560,
+   "e": 3740
+  },
+  {
+   "t": "shot.",
+   "s": 3740,
+   "e": 4160
+  },
+  {
+   "t": "Here's",
+   "s": 4640,
+   "e": 5200
+  },
+  {
+   "t": "pricing.",
+   "s": 5200,
+   "e": 5700
+  },
+  {
+   "t": "Flip",
+   "s": 6060,
+   "e": 6500
+  },
+  {
+   "t": "to",
+   "s": 6500,
+   "e": 6680
+  },
+  {
+   "t": "yearly,",
+   "s": 6680,
+   "e": 7020
+  },
+  {
+   "t": "and",
+   "s": 7220,
+   "e": 7480
+  },
+  {
+   "t": "it's",
+   "s": 7480,
+   "e": 7680
+  },
+  {
+   "t": "50%",
+   "s": 7680,
+   "e": 8320
+  },
+  {
+   "t": "off.",
+   "s": 8320,
+   "e": 8800
+  },
+  {
+   "t": "And",
+   "s": 9360,
+   "e": 9780
+  },
+  {
+   "t": "channels.",
+   "s": 9780,
+   "e": 10240
+  },
+  {
+   "t": "The",
+   "s": 10600,
+   "e": 10940
+  },
+  {
+   "t": "formats",
+   "s": 10940,
+   "e": 11380
+  },
+  {
+   "t": "that",
+   "s": 11380,
+   "e": 11640
+  },
+  {
+   "t": "keep",
+   "s": 11640,
+   "e": 11880
+  },
+  {
+   "t": "winning.",
+   "s": 11880,
+   "e": 12140
+  }
+ ],
+ "marks": [
+  {
+   "w": 3,
+   "kind": "scroll",
+   "label": "scroll",
+   "off": 1,
+   "at": 1001
+  },
+  {
+   "w": 13,
+   "kind": "click",
+   "label": "click \"Pricing\"",
+   "off": -17,
+   "at": 5183
+  },
+  {
+   "w": 16,
+   "kind": "click",
+   "label": "click \"Yearly\"",
+   "off": -22,
+   "at": 6658
+  },
+  {
+   "w": 19,
+   "kind": "scroll",
+   "label": "scroll",
+   "off": 1,
+   "at": 7681
+  },
+  {
+   "w": 22,
+   "kind": "click",
+   "label": "click \"Channels\"",
+   "off": -13,
+   "at": 9767
+  },
+  {
+   "w": 24,
+   "kind": "scroll",
+   "label": "scroll",
+   "off": -3,
+   "at": 10937
+  }
+ ],
+ "segments": [
+  {
+   "id": "s1",
+   "from": 0,
+   "to": 740,
+   "said": "This is Refs.",
+   "intent": "Open on the product"
+  },
+  {
+   "id": "s2",
+   "from": 1000,
+   "to": 4160,
+   "said": "Every launch film is broken down, shot by shot.",
+   "intent": "Land on the homepage, glide down it while it is described"
+  },
+  {
+   "id": "s3",
+   "from": 4640,
+   "to": 5680,
+   "said": "Here's pricing.",
+   "intent": "Go to pricing"
+  },
+  {
+   "id": "s4",
+   "from": 6060,
+   "to": 8800,
+   "said": "Flip to yearly, and it's 50% off.",
+   "intent": "Flip the plan toggle to yearly"
+  },
+  {
+   "id": "s5",
+   "from": 9380,
+   "to": 10240,
+   "said": "And channels.",
+   "intent": "Go to channels"
+  },
+  {
+   "id": "s6",
+   "from": 10600,
+   "to": 12140,
+   "said": "The formats that keep winning.",
+   "intent": "Scroll the channel formats"
+  }
+ ]
+}

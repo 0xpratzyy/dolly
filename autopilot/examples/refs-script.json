@@ -1,0 +1,27 @@
+{
+  "url": "https://refs.video",
+  "title": "Refs: a library of launch videos, taken apart shot by shot",
+  "avoid": ["checkout", "get pro", "log ?in", "sign ?(in|up)"],
+  "scenes": [
+    {
+      "goal": "Land on the homepage and look around",
+      "narration": "Refs is a library of launch videos, taken apart shot by shot.",
+      "actions": [{"wait": 700}, {"scroll": 520}, {"wait": 500}, {"scroll": -520}]
+    },
+    {
+      "goal": "Show the plans",
+      "narration": "Start free. Pay only when you want every film.",
+      "actions": [{"click": "Pricing"}, {"wait": 500}, {"scroll": 240}, {"scroll": -240}, {"click": "Monthly"}, {"wait": 700}, {"click": "Yearly"}]
+    },
+    {
+      "goal": "Browse the channels",
+      "narration": "Channels group the formats that keep working.",
+      "actions": [{"click": "Channels"}, {"wait": 600}, {"scroll": 380}, {"scroll": -380}]
+    },
+    {
+      "goal": "Open one channel",
+      "narration": "Open one, and see exactly how it is built.",
+      "actions": [{"click": "a[href^=\"/channels/\"]"}, {"wait": 500}, {"scroll": 460}]
+    }
+  ]
+}

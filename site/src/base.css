@@ -1,0 +1,92 @@
+/* Refs site system v3 (source of truth: ~/code/refs/web/src/app/tokens.css): graphite base, ivory primary,
+   ONE ice-cyan accent in small doses (focus, badges, the active dot), never a fill or a glow. */
+:root {
+  --c-canvas: #0C0C0D;
+  --c-surface: #161718;
+  --c-surface-raised: #1D1E20;
+  --c-surface-hover: #242527;
+  --c-surface-inset: #0D0D0D;
+  --c-inset-line: #1D1D1D;
+  --c-ink: #F2F3F4;
+  --c-ink-secondary: #C4C7CA;
+  --c-ink-muted: #9CA0A4;
+  --c-ink-faint: #8A8E92;
+  --c-deco: #6E7377;
+  --c-line: #222426;
+  --c-line-strong: #2D3033;
+  --c-on-signal: #111213;
+  --c-ice: #86E4F0;
+  --c-on-ice: #03191C;
+  --c-pill: #232426;
+  --shadow-pill: inset 0 0 0 1px rgba(255, 255, 255, .07);
+  --shadow-inset: inset 0 1px 2px rgba(0, 0, 0, .5);
+  --shadow-pop: 0 24px 60px -20px rgba(0, 0, 0, .8);
+  /* the page's own names, mapped onto the system */
+  --bg: var(--c-canvas);
+  --ink: var(--c-ink);
+  --ink2: var(--c-ink-secondary);
+  --mute: var(--c-ink-muted);
+  --dim: var(--c-ink-faint);
+  --line: var(--c-line);
+  --line2: var(--c-line-strong);
+  --card: var(--c-surface);
+  --card2: var(--c-surface-raised);
+  --hover: var(--c-surface-hover);
+  --glass: rgba(22, 23, 24, .78);
+  --ice: var(--c-ice);
+  --r-card: 24px;
+  --r-panel: 28px;
+  --gut: 16px;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --hb: clamp(72px, 10.6vw, 140px);
+  --sans: 'Figtree', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'DM Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html { color-scheme: dark; scroll-behavior: smooth; -webkit-text-size-adjust: 100%; scroll-padding-top: 16px; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink); font: 500 16px/26px var(--sans);
+  overflow-x: hidden; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; position: relative;
+}
+a { color: inherit; }
+button { font: inherit; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+code { font-family: var(--mono); font-size: 0.86em; }
+:focus-visible { outline: 2px solid var(--ice); outline-offset: 3px; }
+::selection { background: rgba(134, 228, 240, .3); color: var(--ink); }
+h1, h2, h3, p { margin: 0; }
+main { overflow-x: clip; }
+
+/* ---------- buttons ---------- */
+.pill {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 18px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--card); font-weight: 600; font-size: 14px;
+  text-decoration: none; transition: background .2s, border-color .2s, transform .2s var(--ease); white-space: nowrap;
+}
+.pill:hover { border-color: var(--line2); background: var(--card2); }
+.pill:active { transform: scale(0.97); }
+.pill.ghost { background: transparent; }
+.pill.sm { height: 38px; padding: 0 16px; }
+.pill.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.pill.primary:hover { background: #fff; }
+.pill.big { height: 48px; padding: 0 28px; font-size: 15px; gap: 10px; }
+.round-btn {
+  width: 44px; height: 44px; flex: none; display: inline-grid; place-items: center; border-radius: 50%; border: 1px solid var(--line);
+  background: transparent; font-size: 20px; line-height: 1; transition: background .2s, border-color .2s, transform .2s var(--ease);
+}
+.round-btn:hover { background: var(--card2); border-color: var(--line2); }
+.round-btn:active { transform: scale(0.94); }
+.rv { opacity: 0; transform: translateY(22px); transition: opacity .8s var(--ease) var(--d, 0ms), transform .8s var(--ease) var(--d, 0ms); }
+.rv.in { opacity: 1; transform: none; }
+/* ======================= Dolly ======================= */
+.mark { width: 14px; height: 14px; border-radius: 4px; border: 2px solid var(--ink); position: relative; display: inline-block; }
+.mark::after { content: ''; position: absolute; left: 50%; top: -5px; bottom: -5px; width: 2px; background: var(--ice); transform: translateX(-50%); }
+.wm { font-size: 22px; letter-spacing: -0.045em; }
+.brand { gap: 10px; }
+.pill[data-copied='true'] svg { color: var(--ice); }
+.pill.primary[data-copied='true'] svg { color: var(--c-on-ice); }
+.pill svg { flex: none; }
+.mono { font-family: var(--mono); }
+kbd { font: 500 10.5px/1 var(--mono); padding: 3px 5px; border-radius: 6px; border: 1px solid var(--line2); background: rgba(255,255,255,.04); color: var(--ink2); margin-left: 2px; }
+.link { background: none; border: 0; padding: 4px 6px; margin: -4px -6px; border-radius: 8px; color: var(--mute); font-weight: 600; font-size: 12.5px; transition: color .15s; }
+.link:hover { color: var(--ink); }
+

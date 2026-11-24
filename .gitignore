@@ -1,0 +1,28 @@
+.metadata_never_index
+
+# macOS
+.DS_Store
+
+# Private working folder (never published)
+internal/
+
+# Demo footage that is not ours to publish (a real person in Subtle's demo clip, recordings of refs.video).
+# Regenerate locally: see docs/media.md
+site/public/hero/
+site/public/demo/
+site/public/spot/
+site/public/narrate/
+autopilot/examples/narrate/*.mp4
+autopilot/examples/narrate/*.m4a
+autopilot/examples/narrate/*.jpg
+autopilot/examples/*.jpg
+studio/demo/*/*.jpg
+studio/demo/*/*.mp4
+studio/demo/*/*.mov
+
+# secrets and local state
+.env
+.env.*
+*.pem
+*.key
+.dev.vars

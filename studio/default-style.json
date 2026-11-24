@@ -1,0 +1,36 @@
+{
+  "background": {
+    "type": "preset",
+    "value": "graphite"
+  },
+  "padding": 7,
+  "radius": 20,
+  "shadow": 0.7,
+  "frame": "none",
+  "frameLabel": "",
+  "aspect": "16:9",
+  "fit": "letterbox",
+  "resolution": "1080p",
+  "zoom": {
+    "auto": true,
+    "amount": 1,
+    "speed": 1,
+    "follow": 0.7
+  },
+  "cursor": {
+    "visible": true,
+    "size": 1,
+    "smoothing": 0.6,
+    "hideWhenIdle": true
+  },
+  "clickEffect": "ripple",
+  "motionBlur": 0.5,
+  "keystrokes": true,
+  "idleSpeedup": true,
+  "captions": {
+    "enabled": true,
+    "style": "glass",
+    "position": "bottom",
+    "size": 1
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "status": "ready",
+  "url": "https://refs.video",
+  "viewport": "1440x900",
+  "avoid": [
+    "checkout",
+    "get pro",
+    "upgrade",
+    "subscribe",
+    "buy",
+    "purchase",
+    "pay\\b",
+    "log ?out",
+    "sign ?out",
+    "log ?in",
+    "sign ?(in|up)",
+    "delete",
+    "remove account"
+  ],
+  "voice": "voice.m4a",
+  "facecam": "facecam.mp4",
+  "durationMs": 14567,
+  "language": "en",
+  "_help": "Fill each segment.actions (see SKILL.md, Narrate). `at` = a word from `timing` (e.g. \"pricing\", \"pricing#2\" for the 2nd one, \"end:pricing\") or ms. Actions: click|hover|type(+into)|press|scroll(+to)|wait|goto, plus optional mobile override. Set status to \"ready\" when done.",
+  "segments": [
+    {
+      "id": "s1",
+      "startMs": 0,
+      "endMs": 740,
+      "said": "This is Refs.",
+      "timing": "This@0-180 is@180-340 Refs.@340-740",
+      "intent": "Open on the product",
+      "actions": []
+    },
+    {
+      "id": "s2",
+      "startMs": 1000,
+      "endMs": 4160,
+      "said": "Every launch film is broken down, shot by shot.",
+      "timing": "Every@1000-1500 launch@1500-1800 film@1800-2080 is@2080-2260 broken@2260-2600 down,@2600-2960 shot@3200-3560 by@3560-3740 shot.@3740-4160",
+      "intent": "Land on the homepage, glide down it while it is described",
+      "actions": [
+        {
+          "scroll": 480,
+          "at": "Every",
+          "to": "end:shot#2"
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "startMs": 4640,
+      "endMs": 5680,
+      "said": "Here's pricing.",
+      "timing": "Here's@4640-5200 pricing.@5200-5680",
+      "intent": "Go to pricing",
+      "actions": [
+        {
+          "click": "Pricing",
+          "at": "pricing"
+        }
+      ],
+      "emphasize": [
+        "pricing."
+      ]
+    },
+    {
+      "id": "s4",
+      "startMs": 6060,
+      "endMs": 8800,
+      "said": "Flip to yearly, and it's 50% off.",
+      "timing": "Flip@6060-6500 to@6500-6680 yearly,@6680-7020 and@7220-7480 it's@7480-7680 50%@7680-8320 off.@8320-8800",
+      "intent": "Flip the plan toggle to yearly",
+      "actions": [
+        {
+          "click": "Yearly",
+          "at": "yearly"
+        },
+        {
+          "scroll": 240,
+          "at": "50%",
+          "ms": 1100
+        }
+      ],
+      "emphasize": [
+        "50%",
+        "yearly,"
+      ]
+    },
+    {
+      "id": "s5",
+      "startMs": 9380,
+      "endMs": 10240,
+      "said": "And channels.",
+      "timing": "And@9380-9780 channels.@9780-10240",
+      "intent": "Go to channels",
+      "actions": [
+        {
+          "click": "Channels",
+          "at": "channels"
+        }
+      ],
+      "emphasize": [
+        "channels."
+      ]
+    },
+    {
+      "id": "s6",
+      "startMs": 10600,
+      "endMs": 12140,
+      "said": "The formats that keep winning.",
+      "timing": "The@10600-10940 formats@10940-11380 that@11380-11640 keep@11640-11880 winning.@11880-12140",
+      "intent": "Scroll the channel formats",
+      "actions": [
+        {
+          "scroll": 380,
+          "at": "formats",
+          "to": "end:winning"
+        }
+      ]
+    }
+  ],
+  "_explore": "explore.json lists what is on the product"
+}
