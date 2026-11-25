@@ -371,6 +371,8 @@
       el = isCss ? first : containerFor(first, opts.maxArea || 0.4);
       if (opts.exact) el = first;
       el.scrollIntoView({block: 'center', inline: 'center'});
+      // dry: only resolve + scroll (capture.mjs screenshots the untouched page for the context intro, then isolates)
+      if (opts.dry) { const q = rectOf(el); return {ok: true, rect: {x: q.left, y: q.top, w: q.width, h: q.height}}; }
       S.keep.add(el);
       applyKeep();
       flattenAll(el);

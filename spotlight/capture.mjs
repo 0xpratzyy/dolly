@@ -9,6 +9,7 @@
 //        --actions <json>   --viewport 1440x900   --scale 2|3|4 (default: automatic, 2-4 by the component's size)   --out <dir>   --lead 500 --tail 900 (ms of rest before / after)
 //        --pad 130 (px around the component)   --max-area 0.4   --dark | --light (colour scheme)   --seed 1   --no-flatten
 //        --exact (use the matched element itself, no climbing to a container)   --hide "sel,sel"   --fps 60 (default)
+//        --context on|off (default on): also save the untouched page (context.jpg + spotlight.json `context`) for the intro beat
 // actions.json: see spotlight/README.md (hover, click, type, press, select, drag, slide, swipe, scroll, wait, move, state).
 import fs from 'node:fs';
 import {spawn} from 'node:child_process';
@@ -41,6 +42,8 @@ const prof = accumulator(); // per-frame sums for DOLLY_PROFILE (studio/scripts/
 let SCALE = Number(flags.scale ?? 2); // without --scale it is raised after the measuring pass so a small component stays crisp as a big hero
 const PAD = Number(flags.pad ?? 130);
 const LEAD = Number(flags.lead ?? 500), TAIL = Number(flags.tail ?? 900);
+// --context on|off (default on; --no-context): save the page as it looked (context.jpg) for the renderer's context intro
+const CONTEXT = !flags['no-context'] && flags.context !== 'off' && flags.context !== 'false';
 const out = path.resolve(flags.out);
 const actions = flags.actions ? JSON.parse(fs.readFileSync(flags.actions, 'utf8')) : [];
 const url = flags.html ? pathToFileURL(path.resolve(flags.html)).href : flags.url;
@@ -94,7 +97,22 @@ async function pass(browser, capture, clip) {
   await pump(300);
   if (flags.hide) await page.addStyleTag({content: `${flags.hide}{display:none!important}`});
   if (flags['no-flatten']) await page.evaluate(() => window.__sp.setFlatten(false));
-  const info = await page.evaluate(([t, o]) => { window.__sp.snapshotKnown(); return window.__sp.isolate(t, o); }, [flags.target, {maxArea: Number(flags['max-area'] ?? 0.4), exact: !!flags.exact}]);
+  const isoOpts = {maxArea: Number(flags['max-area'] ?? 0.4), exact: !!flags.exact};
+  // context intro: the real page as it looked (viewport, page background on), before anything is hidden. Pass 2 only.
+  let context = null;
+  if (capture && CONTEXT) {
+    const dry = await page.evaluate(([t, o]) => window.__sp.isolate(t, {...o, dry: true}), [flags.target, isoOpts]);
+    if (dry.ok) {
+      await pump(DT * 2);
+      await cdp.send('Emulation.setDefaultBackgroundColorOverride', {});
+      const shot = await cdp.send('Page.captureScreenshot', {format: 'jpeg', quality: 90, fromSurface: true, captureBeyondViewport: false});
+      await cdp.send('Emulation.setDefaultBackgroundColorOverride', {color: {r: 0, g: 0, b: 0, a: 0}});
+      fs.writeFileSync(path.join(out, 'context.jpg'), Buffer.from(shot.data, 'base64'));
+      context = {image: 'context.jpg', w: VW, h: VH, scale: SCALE, rect: [dry.rect.x, dry.rect.y, dry.rect.w, dry.rect.h].map((v) => +v.toFixed(1))};
+    }
+  }
+  const info = await page.evaluate(([t, o]) => { window.__sp.snapshotKnown(); return window.__sp.isolate(t, o); }, [flags.target, isoOpts]);
+  info.context = context;
   if (!info.ok) { await ctx.close(); die(info.why); }
   await pump(100);
 
@@ -326,6 +344,9 @@ try {
     hovers: rec.hovers.map((q) => ({...q, x: rel(q.x, q.y)[0], y: rel(q.x, q.y)[1]})),
     keys: rec.keys, states: rec.states, sounds: rec.sounds,
   };
+  // the page before isolation (viewport CSS px; the capture image sits at `clip` inside it), for the context intro
+  if (c.info.context) spot.context = c.info.context;
+  else fs.rmSync(path.join(out, 'context.jpg'), {force: true});
   // the frames as ONE alpha video (VP9 WebM, about 1 % of the PNGs' size); the PNG sequence is deleted unless --keep-frames
   if (rec.webm) {
     spot.image.video = 'frames.webm';

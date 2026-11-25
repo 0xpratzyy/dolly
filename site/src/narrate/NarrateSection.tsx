@@ -5,6 +5,9 @@ import {Icon, fmtTime} from '../ui';
 import {track} from '../analytics';
 import {useCopy} from '../copy';
 import {NARRATE_PROMPT_DEFAULTS, buildNarratePrompt} from './prompt';
+import {Credits, Group, InspShell, PhoneNote, SIcon, TopSlot, type Section} from '../editor/shell';
+import {ExportButton, PromptPreview} from '../editor/Export';
+import {Field, Seg, Toggle} from '../editor/controls';
 
 type Mark = (typeof data.marks)[number];
 type Aspect = '16x9' | '9x16';
@@ -12,11 +15,14 @@ type Aspect = '16x9' | '9x16';
 const SRC: Record<Aspect, string> = {'16x9': media('narrate/narrate-16x9.mp4'), '9x16': media('narrate/narrate-9x16.mp4')};
 const POSTER: Record<Aspect, string> = {'16x9': media('narrate/poster-16x9.jpg'), '9x16': media('narrate/poster-9x16.jpg')};
 const marksByWord = new Map<number, Mark>(data.marks.map((m) => [m.w, m]));
+type NarTab = 'transcript' | 'film';
+const TABS: Section<NarTab>[] = [{id: 'transcript', name: 'Transcript', icon: SIcon.text}, {id: 'film', name: 'Your film', icon: SIcon.prompt}];
 const fmtOff = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : '±'}${Math.abs(n)} ms`;
 
 /** The words-to-clicks view: the real narrate demo (a computer voice and a test-card face) with its transcript beside it. */
 export default function NarrateSection() {
   const [aspect, setAspect] = useState<Aspect>('16x9');
+  const [tab, setTab] = useState<NarTab>('transcript');
   const [playing, setPlaying] = useState(false);
   const [t, setT] = useState(0);
   const video = useRef<HTMLVideoElement>(null);
@@ -83,27 +89,48 @@ export default function NarrateSection() {
   const lines = useMemo(() => data.segments.map((s) => ({...s, words: data.words.map((w, i) => ({w, i})).filter(({w}) => w.s >= s.from - 5 && w.s < s.to)})), []);
   const pct = Math.min(100, (t / data.durationMs) * 100);
 
+  const seekTrack = (e: React.MouseEvent<HTMLDivElement>) => { const r = e.currentTarget.getBoundingClientRect(); seek(((e.clientX - r.left) / r.width) * data.durationMs, 'track'); };
+  const copy = <CopyBtn id="prompt-narrate" text={prompt} label="Copy prompt for Narrate" primary big />;
+  const r = aspect === '16x9' ? 16 / 9 : 9 / 16;
+
   return (
-    <div className="nar">
-      <div className="nar-grid">
-        <div className={`nar-stage a-${aspect}`} ref={box}>
-          <div className="nar-screen">
+    <div className="ws ws-sub nar">
+      <TopSlot at="left"><span className="fm-title">Narrate<em>Demo · a sample voice drives the product</em></span></TopSlot>
+      <TopSlot at="right">
+        <ExportButton>
+          {() => (
+            <div className="exp-sec">
+              <h3>Hand it to Claude Code</h3>
+              <p className="hint">The prompt carries the repo, the install, your URL, what your talk is and the commands. Set them under Your film, then paste it into Claude Code.</p>
+              {copy}
+              <PromptPreview text={prompt} />
+            </div>
+          )}
+        </ExportButton>
+      </TopSlot>
+      <div className="ws-stage" ref={box}>
+        <div className="stage">
+          <div className="nar-screen" style={{'--r': r} as React.CSSProperties}>
             <video ref={video} key="v" src={near ? SRC[aspect] : undefined} poster={POSTER[aspect]} playsInline muted={false} preload="metadata" loop={false}
               onClick={toggle} aria-label="The Narrate demo: a spoken launch video with the product driven by the words" />
-            <button type="button" className={`nar-play${playing ? ' on' : ''}`} onClick={toggle} aria-label={playing ? 'Pause the demo' : 'Play the demo'}>{playing ? Icon.pause : Icon.play}</button>
           </div>
-          <div className="nar-bar">
-            <div className="seg slim" role="radiogroup" aria-label="Aspect ratio">
-              {([['16x9', '16:9'], ['9x16', '9:16']] as [Aspect, string][]).map(([k, n]) => (
-                <button key={k} type="button" role="radio" aria-checked={aspect === k} className={aspect === k ? 'on' : ''} onClick={() => pickAspect(k)}>{n}</button>
-              ))}
-            </div>
-            <div className="nar-time mono" aria-live="off">{fmtTime(t / 1000)} / {fmtTime(data.durationMs / 1000)}</div>
-          </div>
-          <p className="nar-honest mono">Demo voice: a computer voice. Face bubble: a colour-bar test card.</p>
         </div>
-
-        <div className="nar-tr">
+      </div>
+      <div className="ws-bar">
+        <button type="button" className="ibtn play" onClick={toggle} aria-label={playing ? 'Pause the demo' : 'Play the demo'} data-tip={playing ? 'Pause' : 'Play'}>{playing ? Icon.pause : Icon.play}</button>
+        <div className="nar-time" aria-live="off">{fmtTime(t / 1000)} <em>/ {fmtTime(data.durationMs / 1000)}</em></div>
+        <div className="nar-track" onClick={seekTrack} role="presentation">
+          <i style={{width: `${pct}%`}} />
+          {data.marks.map((m, i) => <u key={i} className={m.kind} style={{left: `${(m.at / data.durationMs) * 100}%`}} />)}
+        </div>
+        <div className="seg slim" role="radiogroup" aria-label="Aspect ratio">
+          {([['16x9', '16:9'], ['9x16', '9:16']] as [Aspect, string][]).map(([k, n]) => (
+            <button key={k} type="button" role="radio" aria-checked={aspect === k} className={aspect === k ? 'on' : ''} onClick={() => pickAspect(k)}>{n}</button>
+          ))}
+        </div>
+      </div>
+      <InspShell sections={TABS} tab={tab} setTab={setTab} footer={<><Credits /><span className="foot-sp" /><span className="foot-meta">Sample voice</span></>}>
+        {tab === 'transcript' && (
           <div className="nar-lines" role="group" aria-label="Transcript with the actions it triggers">
             {lines.map((l) => (
               <p key={l.id} className="nar-line">
@@ -126,44 +153,21 @@ export default function NarrateSection() {
               </p>
             ))}
           </div>
-          <div className="nar-track" aria-hidden>
-            <i style={{width: `${pct}%`}} />
-            {data.marks.map((m, i) => <u key={i} className={m.kind} style={{left: `${(m.at / data.durationMs) * 100}%`}} />)}
-          </div>
-        </div>
-      </div>
-
-      <div className="nar-lower">
-        <div className="nar-prompt">
-          <div className="nar-fields">
-            <label className="ctl txt"><span className="ctl-l"><span>Your product URL</span></span><input value={inputs.url} onChange={(e) => set({url: e.target.value})} spellCheck={false} autoComplete="off" /></label>
-            <div className="ctl"><span className="ctl-l"><span>Your talk is</span></span>
-              <div className="seg" role="radiogroup" aria-label="Input type">
-                {([['voice', 'A voice memo'], ['facecam', 'A face-cam clip']] as const).map(([k, n]) => (
-                  <button key={k} type="button" role="radio" aria-checked={inputs.input === k} className={inputs.input === k ? 'on' : ''} onClick={() => set({input: k})}>{n}</button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <CopyBtn id="prompt-narrate" text={prompt} label="Copy prompt for Narrate" primary big />
-          <details className="adv sub-adv">
-            <summary>Advanced<span aria-hidden>{Icon.plus}</span></summary>
-            <div className="adv-in">
-              <div className="ctl"><span className="ctl-l"><span>Sign-in</span></span>
-                <div className="seg" role="radiogroup" aria-label="Sign-in">
-                  {([['public', 'None needed'], ['login', 'My own session']] as const).map(([k, n]) => (
-                    <button key={k} type="button" role="radio" aria-checked={inputs.login === k} className={inputs.login === k ? 'on' : ''} onClick={() => set({login: k})}>{n}</button>
-                  ))}
-                </div>
-              </div>
-              <button type="button" role="switch" aria-checked={inputs.vertical} className="ctl tg" onClick={() => set({vertical: !inputs.vertical})}>
-                <span className="ctl-l"><span>Also make the 9:16 cut</span></span><span className={`sw${inputs.vertical ? ' on' : ''}`} aria-hidden />
-              </button>
-              <pre className="nar-pre" aria-label="The prompt">{prompt}</pre>
-            </div>
-          </details>
-        </div>
-      </div>
+        )}
+        {tab === 'film' && (
+          <>
+            <Group>
+              <Field label="Your product URL" value={inputs.url} onChange={(v) => set({url: v})} />
+              <Seg label="Your talk is" value={inputs.input} options={[['voice', 'A voice memo'], ['facecam', 'A face-cam clip']]} onChange={(v) => set({input: v})} />
+            </Group>
+            <Group title="Options">
+              <Seg label="Sign-in" value={inputs.login} options={[['public', 'None needed'], ['login', 'My own session']]} onChange={(v) => set({login: v})} />
+              <Toggle label="Also make the 9:16 cut" on={inputs.vertical} onChange={(v) => set({vertical: v})} />
+            </Group>
+          </>
+        )}
+      </InspShell>
+      <PhoneNote>{copy}</PhoneNote>
     </div>
   );
 }

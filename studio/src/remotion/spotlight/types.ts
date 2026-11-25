@@ -32,6 +32,12 @@ export interface SpotlightMeta {
   sounds?: {tMs: number; kind: string}[];
   target?: string;
   resolved?: string;
+  url?: string;
+  /** where the capture image sits in the page viewport (CSS px) */
+  clip?: {x: number; y: number; width: number; height: number};
+  /** The untouched page before isolation (capture.mjs --context): a viewport screenshot next to spotlight.json. rect = the
+   * component's element box in it (CSS px). The capture image sits at `clip` in the same coordinates. */
+  context?: {image: string; w: number; h: number; scale: number; rect: [number, number, number, number]};
 }
 
 export interface SpotlightItem {
@@ -42,27 +48,32 @@ export interface SpotlightItem {
   label?: string;
 }
 
-export type SceneId = 'void' | 'studio' | 'wallpaper' | 'desk' | 'curtain';
+export type SceneId = 'graphite' | 'void' | 'studio' | 'wallpaper';
 export type LayoutId = 'single' | 'carousel' | 'collage' | 'grid';
 export type SpotAspect = '3:2' | '16:9' | '1:1' | '4:5' | '9:16';
 
 export interface SpotlightOptions {
   scene: SceneId;
-  /** Background for the wallpaper and desk scenes (any Dolly background, shader / photo / AI wallpaper included). */
+  /** Background for the wallpaper scene (any Dolly background, shader / photo / AI wallpaper included). */
   background?: Style['background'];
   layout: LayoutId;
   aspect: SpotAspect;
   /** Width of the hero as a fraction of the frame (0.2..0.9). Default: automatic, small components get lots of negative space. */
   hero?: number;
-  /** 3D tilt of the hero in degrees (0 = flat). Default 9. */
+  /** 3D tilt of the hero in degrees (0 = flat). Default 3 (a slow symmetric sweep, never an off-centre lean). */
   tilt: number;
+  /** Context intro (beat 1): open on the real page, ring the component, lift it out. auto = on when the capture has a
+   * context screenshot and this is not a loop; on in a loop = the intro plays every cycle (the end lowers it back in). */
+  intro?: 'auto' | 'on' | 'off';
+  /** Action push-in: the camera eases in toward the control being used (about this factor), holds, eases back out. 0 = off. */
+  push?: number;
   /** Depth of field and entrance blur, 0..1. */
   dof: number;
   /** Directional motion blur on camera moves, 0..1. */
   motionBlur: number;
   /** Seamless loop: the end state matches the start (short single components). */
   loop: boolean;
-  /** Reflection under the hero (default: on for void and curtain). */
+  /** Reflection under the hero (default: on for void). */
   reflection?: boolean;
   /** Colour of an edge glow around the component, or false. */
   glow?: string | false;
@@ -87,7 +98,7 @@ export interface SpotlightProps extends SpotlightOptions {
 }
 
 export const defaultSpotlightOptions: SpotlightOptions = {
-  scene: 'void', layout: 'single', aspect: '3:2', tilt: 9, dof: 0.6, motionBlur: 0.55, loop: false, shadow: 0.75,
+  scene: 'graphite', layout: 'single', aspect: '3:2', tilt: 3, intro: 'auto', push: 1.35, dof: 0.6, motionBlur: 0.55, loop: false, shadow: 0.75,
   cursor: {visible: true, size: 1.25, theme: 'mac', ripple: true},
 };
 

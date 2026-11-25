@@ -32,16 +32,19 @@ export const BASE: Style = mergeStyle(defaultStyle, PLAN.style, stylePresets.dun
 const files = import.meta.glob('@subtle-styles/*.json', {eager: true, import: 'default'}) as Record<string, any>;
 export const CAPTION_STYLES: Record<string, any> = {};
 for (const [p, v] of Object.entries(files)) CAPTION_STYLES[p.split('/').pop()!.replace('.json', '')] = v;
+// Dolly's own styles (studio/caption-styles: clean, the default) on top, as the CLI reads them first
+const own = import.meta.glob('../../studio/caption-styles/*.json', {eager: true, import: 'default'}) as Record<string, any>;
+for (const [p, v] of Object.entries(own)) CAPTION_STYLES[p.split('/').pop()!.replace('.json', '')] = v;
 // Strongest first, as on the Subtle site; "behind the speaker" styles need a person cut-out and song styles are for lyrics, so neither is offered.
-const TOP = ['outline', 'magazine', 'stack', 'rise', 'sticker', 'duo', 'editorial', 'cinema', 'impact', 'block', 'highlighter', 'numeral', 'split', 'glide', 'serif', 'shine', 'newsroom', 'cards', 'punch', 'flip', 'accent', 'glass', 'chip', 'quiet'];
+const TOP = ['clean', 'outline', 'magazine', 'stack', 'rise', 'sticker', 'duo', 'editorial', 'cinema', 'impact', 'block', 'highlighter', 'numeral', 'split', 'glide', 'serif', 'shine', 'newsroom', 'cards', 'punch', 'flip', 'accent', 'glass', 'chip', 'quiet'];
 const usable = (n: string) => !CAPTION_STYLES[n]?.behind?.enabled && CAPTION_STYLES[n]?.group !== 'music';
 export const CAPTION_NAMES: string[] = [...TOP.filter((n) => CAPTION_STYLES[n]), ...Object.keys(CAPTION_STYLES).filter((n) => !TOP.includes(n))].filter(usable);
 
 // ---- three demo caption lines, in OUTPUT time (this clip has no speed-ups, so output = source time). Words in *stars* are highlighted.
 export const DEFAULT_LINES = ['Every film, *taken apart.*', 'Start free. Pay *when you want more.*', 'Open a channel, and see how it is *built.*'];
 export const LINE_TIMES: [number, number][] = [[1300, 4400], [5200, 9200], [16300, 20300]];
-export const toCaptions = (lines: string[]): Caption[] =>
-  lines.flatMap((text, i) => (text.trim() ? [{startMs: LINE_TIMES[i][0], endMs: LINE_TIMES[i][1], text: text.trim()}] : []));
+export const toCaptions = (lines: string[], times: [number, number][] = LINE_TIMES): Caption[] =>
+  lines.flatMap((text, i) => (text.trim() ? [{startMs: times[i][0], endMs: times[i][1], text: text.trim()}] : []));
 
 export const ASPECTS: Style['aspect'][] = ['16:9', '9:16', '1:1', '4:5'];
 export const LOOKS: [string, string][] = [['dunes', 'Dunes'], ['alpine', 'Alpine dawn'], ['ocean', 'Pastel ocean'], ['meadow', 'Golden meadow'], ['night', 'Glass graphite'], ['liquid', 'Liquid dusk'], ['ribbons', 'Ribbons'], ['glass', 'Glass'], ['sand', 'Sand'], ['dusk', 'Dusk'], ['ice', 'Ice'], ['browser', 'Browser'], ['noir', 'Noir'], ['focus', 'Focus'], ['plain', 'Graphite'], ['bare', 'Bare'], ['vertical', 'Vertical'], ['square', 'Square']];

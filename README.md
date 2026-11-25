@@ -18,7 +18,7 @@ Playground: dolly.refs.video (coming soon) · Made by [Refs](https://refs.video)
 | **Record** | A screen recording from `dolly-record` (or your own with an `events.json`) | A polished render of your own footage | Stable |
 | **Autopilot** | A product URL (or a feature to show) | Claude drives a real browser at 60 fps and renders the demo with captions | Beta |
 | **Narrate** | A voice memo or face-cam clip about what you launched | The product is opened and clicked at the exact word you say it; your voice, your face in a bubble, captions | Beta |
-| **Spotlight** | A page or HTML snippet and a component selector | A feed-ready loop of one piece of UI on a stage (Void, Studio, Wallpaper, Desk, Curtain) | Beta |
+| **Spotlight** | A page or HTML snippet and a component selector | A feed-ready loop of one piece of UI lifted out of its page onto a stage (Graphite, Studio, Wallpaper), with an action push-in | Beta |
 
 Autopilot, Narrate and Spotlight work well on public marketing pages, local dev servers and staging sites. Expect to look at the
 contact sheet and ask Claude for a fix or two.

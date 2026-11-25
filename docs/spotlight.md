@@ -1,8 +1,15 @@
 # Spotlight: isolate one piece of UI and turn it into a feed-ready animation
 
 No recording. Dolly opens the live page (or a local HTML snippet), finds the component, hides everything else, drives its
-interactions on a virtual clock and writes the frames as one transparent 60 fps video (`frames.webm`, VP9 with alpha; the PNG frames it is made from are deleted, `--keep-frames` keeps them). The Spotlight composition then films that
-component on a stage (Void, Studio, Wallpaper, Desk, Curtain) with a 3D camera, depth of field, a cursor, shadows and UI sounds.
+interactions on a virtual clock and writes the frames as one transparent 60 fps video (`frames.webm`, VP9 with alpha; the PNG frames it is made from are deleted, `--keep-frames` keeps them). It also saves the page as it looked before
+isolation (`context.jpg`). The Spotlight composition then films a short story on a neutral stage (Graphite, Studio, Wallpaper):
+
+1. **Context** (about 1.2 s): the real page in a quiet browser window; an ice-cyan ring draws around the component, the page
+   dims, falls back and fades while the component lifts out and the camera eases onto it, one move.
+2. **Rest**: the component alone on the stage, the cursor comes in.
+3. **Action**: as it clicks, types or drags, the camera eases in toward the control (about 1.35x), holds while the result
+   animates, then eases back out.
+4. **Payoff**: the whole component, held, in its new state.
 
 ```
 # 1. capture (node spotlight/capture.mjs ...)
@@ -10,10 +17,12 @@ node spotlight/capture.mjs --url https://refs.video --target ".site-links" --act
 node spotlight/capture.mjs --html snippet.html --target "#card" --out caps/card
 
 # 2. render (node studio/spotlight.mjs ...)
-node studio/spotlight.mjs caps/nav --scene void --tilt 11 --glow '#86E4F0' --aspect 3:2,1:1,4:5,9:16
+node studio/spotlight.mjs caps/pricing --aspect 16:9,9:16                           # graphite, context intro, push-in
 node studio/spotlight.mjs caps/nav caps/pricing caps/card --scene studio --layout carousel --aspect 16:9
 node studio/spotlight.mjs caps/pricing --scene wallpaper --bg ai-hills-golden
-node studio/spotlight.mjs caps/card --loop --scene curtain --sound subtle          # 6-12 s seamless loop for X
+node studio/spotlight.mjs caps/card --loop --sound subtle                           # 6-12 s seamless loop for X (no intro)
+node studio/spotlight.mjs caps/card --loop --intro on                               # loop that leaves and re-enters the page every cycle
+node studio/spotlight.mjs caps/panel --push 0 --intro off                           # the old calm framing
 node studio/spotlight.mjs caps/nav --still 220 --scale 0.5                           # one frame, fast look
 sh spotlight/sheet.sh caps/nav 30 6 4                                                # contact sheet of a capture
 ```
@@ -35,7 +44,10 @@ bar. `--exact` keeps the element itself; `--max-area 0.4` limits how far the cli
 - **spotlight.json.** Per frame: union bbox, painted roots, `cards` (the real rounded boxes, used for edge highlights),
   cursor `[tMs,x,y,kind,pressed]`, clicks, hovers, key timings (never the characters), states, sound hints. Coordinates are CSS
   px of the capture image. The cursor itself is not captured; the renderer draws it.
-- Flags: `--viewport 1440x900 --scale 2|3|4` (default automatic: 2-4 by the component's size, so a small component is still crisp as a big hero) `--lead 500 --tail 900 --dark|--light --hide "sel" --cursor-start x,y`.
+- **Context.** Before anything is hidden, the component is scrolled into view and the viewport is screenshotted with the page
+  background on (`context.jpg`, JPEG at the capture scale). `spotlight.json` gets `context: {image, w, h, scale, rect}` (the
+  component's element box in viewport CSS px; the capture image sits at `clip` in the same coordinates). `--context off` skips it.
+- Flags: `--viewport 1440x900 --scale 2|3|4` (default automatic: 2-4 by the component's size, so a small component is still crisp as a big hero) `--lead 500 --tail 900 --dark|--light --hide "sel" --cursor-start x,y --context on|off`.
 
 ### actions.json
 An array, played in order, each with a human cursor (curved, eased, small overshoot, a pause before clicks):
@@ -47,30 +59,49 @@ An array, played in order, each with a human cursor (curved, eased, small oversh
 
 ## Render
 `node studio/spotlight.mjs <dir> [<dir>...]` writes `<dir>/spotlight-<scene>-<layout>.mp4` (h264, audio aac when sound is on).
-- **Scenes** `--scene void|studio|wallpaper|desk|curtain`. `--bg <id>` is any Dolly background (CSS, animated shader, photo, AI
-  wallpaper; see backgrounds.md); `--bg-blur`, `--bg-dim`, `--bg-grain`, `--bg-drift` (slow Ken Burns), `--bg-image file`.
-  Void is near-black with a faint floor sheen and grain; Studio is clean off-white; Desk puts the component on a soft-lit glass
-  slab over a blurred wallpaper; Curtain is dark with soft vertical light streaks, brighter top centre, slowly drifting.
+- **Scenes** `--scene graphite|studio|wallpaper` (default graphite). Neutral on purpose, like the component clips that work
+  (one component, colour only where it is interactive). Graphite is near-black (#0b0b0c) with a broad soft light from the top,
+  a faint floor sheen and fine grain; Studio is clean off-white; Wallpaper is any Dolly background (`--bg <id>`: CSS, animated
+  shader, photo, AI wallpaper; see backgrounds.md), dimmed and softened by default so the UI reads (`--bg-blur 6 --bg-dim 0.22`;
+  pass 0 for the raw picture), plus `--bg-grain`, `--bg-drift` (slow Ken Burns), `--bg-image file`. `void` (the older, flatter
+  black with a reflection) still works. Desk and Curtain were removed; `--scene desk` renders as wallpaper, `curtain` as graphite.
+- **Context intro** `--intro auto|on|off` (default auto: on when the capture has `context.jpg` and this is not a loop). The page
+  is drawn as a browser window (three grey dots, the URL) filling about 88 % of the frame, at 97 % brightness; a 1.5 px
+  #86E4F0 ring with a soft glow tightens onto the component while the page dims to about 64 %; then the page fades and drops
+  back 4.5 % around the component while the component gains its stage shadow and the camera eases (cubic in-out, no overshoot)
+  from the page framing to the hero framing. The capture starts playing at 1.15 s, just before the camera lands, and the cursor
+  fades in only then. `--intro on` in a `--loop` plays the intro every cycle: the end lowers the component back into the page,
+  so the seam is the page itself (and there is no cross-fade).
+- **Action push-in** `--push 1.35` (0 = off). Scheduled from the capture's clicks and key presses (hovers when there are none),
+  never from cursor motion. Actions closer than about 1.6 s of rest are one beat. Each beat: ease in over 0.8 s ending 0.15 s
+  before the first action, hold until 1.1 s after the last one (the result animates), ease out over 0.85 s. It aims at the
+  control(s) touched (the smallest real box under each click, padded) but keeps the frame inside the component; a component that
+  would only just overflow at that zoom is shown whole at about 88 % of the frame instead. The tilt flattens while pushed in. A
+  non-loop ends with at least 1 s of the whole component after the last beat (the payoff); in a loop every beat ends before the
+  seam, so the loop restarts on the same framing. Depth of field stays off on a lone hero; motion blur ignores zoom, so the
+  intro and push-ins stay crisp.
 - **Layouts** `--layout single|carousel|collage|grid`. Carousel pans along a row, each component plays when the camera reaches
   it; collage is a loose arrangement the camera flies through (with depth, small rotations, zoom dips); grid starts on the
   overview, pushes into `--focus N`, plays, pulls back out.
-- **Camera.** Critically damped (it eases onto its target and never passes it). The hero gets ONE slow, steady tilt sweep across
-  the clip (`--tilt 9`, 0 = flat; a slow orbit in a loop); it does not follow the cursor. A gentle push-in over the first 1.3 s,
-  then a slow creep. Depth-of-field blur (`--dof 0.6`) is scheduled: on the entrance, the exit and while the camera travels
+- **Camera.** Critically damped (it eases onto its target and never passes it). The hero gets ONE slow, steady, symmetric tilt
+  sweep across the clip (`--tilt 3`, 0 = flat; a slow orbit in a loop); it does not follow the cursor. Without the intro, a
+  gentle push-in over the first 1.3 s, then a slow creep. The intro and the action push-ins are laid on top on exact frames. Depth-of-field blur (`--dof 0.6`) is scheduled: on the entrance, the exit and while the camera travels
   between components, and on off-focus neighbours; never in the middle of a shot. Directional motion blur on fast moves
   (`--motion-blur 0.55`), `--pace 1.3` for slower. A lone hero is framed on everything it ever paints, so a dropdown opens
   into room that is already there and the frame barely moves.
-- **Framing.** `--hero 0.4` = width of the hero as a fraction of the frame. Default is automatic: 52-76 % by the component's
-  size (the references show the UI at 45-90 % of the frame). Aspects `--aspect 3:2` (1620x1080), `16:9`, `1:1`, `4:5`, `9:16` (comma list renders
+- **Framing.** `--hero 0.4` = width of the hero as a fraction of the frame. Default is automatic: 50-68 % by the component's
+  size, and a tall component is limited by height (about 70-78 % of the frame height), always centred. Aspects `--aspect 3:2` (1620x1080), `16:9`, `1:1`, `4:5`, `9:16` (comma list renders
   each); the hero stays centred and is re-fitted for the frame.
 - **Polish.** Contact + soft + large drop shadows follow the alpha silhouette; a 1 px inner highlight on the real card boxes
-  (dark and light variants); optional edge glow `--glow '#86E4F0'`; reflection on Void/Curtain (`--reflection off`); crisp macOS
+  (dark and light variants); optional edge glow `--glow '#86E4F0'`; reflection on Void (`--reflection on|off`); crisp macOS
   cursor (arrow, hand, I-beam, grab) with a press animation and a click ripple (`--ripple off`, `--cursor light|off`,
   `--cursor-size 1.25`); `--title`, `--wordmark` (tiny eyebrow).
 - **Loop.** `--loop` makes a seamless loop of a single component: the last 0.55 s cross-fade into the first, the camera is
-  periodic (the step across the seam equals the step before it), there is no intro, outro or blur. Capture it so the interaction ends where it started (close the menu, toggle back) and
+  periodic (the step across the seam equals the step before it), push-ins return to the resting framing before the seam, and
+  there is no intro (unless `--intro on`, above), outro or blur. Capture it so the interaction ends where it started (close the menu, toggle back) and
   keep it 6-12 s.
-- **Sound.** `--sound off|subtle|full` (default subtle). Procedural UI sounds (hover tick, press thock, release, toggle, open /
+- **Sound.** `--sound off|subtle|full` (default subtle). Sounds are placed relative to where the capture starts playing (the idle
+  lead is trimmed), so a click sound lands on the click. Procedural UI sounds (hover tick, press thock, release, toggle, open /
   close whoosh, success chime, key ticks) are synthesised in `studio/src/spotlight-sound.ts` (deterministic, no samples), placed on
   the exact frames from the capture's state hints, peaks about -9 dBFS, the top end rolled off. The wav is also written next to
   the video as `*.sounds.wav`.

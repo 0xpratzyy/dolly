@@ -200,7 +200,7 @@ export const defaultStyle: Style = {
   motionBlur: 0.5,
   keystrokes: true,
   idleSpeedup: true,
-  captions: {enabled: true, style: 'glass', position: 'bottom', size: 1},
+  captions: {enabled: true, style: 'clean', position: 'bottom', size: 1},
 };
 
 /**

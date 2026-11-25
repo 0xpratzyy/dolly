@@ -22,7 +22,6 @@ export function HeroPlayer() {
   const [live, setLive] = useState(false); // the video has frames to show
   const still = useRef(reduced());
   const video = useRef<HTMLVideoElement>(null);
-  const bar = useRef<HTMLElement | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const visible = useRef(true);
   const warmed = useRef(-1);
@@ -52,13 +51,12 @@ export function HeroPlayer() {
   // idle: warm the Record prompt so the copy links are instant
   useEffect(() => { const t = setTimeout(() => { warmRecordPrompt().catch(() => {}); }, 4000); return () => clearTimeout(t); }, []);
 
-  // the progress line, drawn straight to the DOM from the video clock
+  // the video clock: warms the next tab's clip near the end (no progress line under the tabs: owner, 2026-11-25)
   useEffect(() => {
     const v = video.current; if (!v || still.current) return;
     let raf = 0;
     const tick = () => {
       const d = v.duration || 0, p = d ? v.currentTime / d : 0;
-      if (bar.current) bar.current.style.transform = `scaleX(${Math.min(1, p).toFixed(4)})`;
       const next = (i + 1) % TABS.length;
       if (!pinned && p > 0.7 && warmed.current !== next) { warmed.current = next; fetch(TABS[next].src, {priority: 'low'} as RequestInit).catch(() => {}); }
       raf = requestAnimationFrame(tick);
@@ -69,7 +67,6 @@ export function HeroPlayer() {
     if (!v.paused) start();
     return () => { stop(); v.removeEventListener('playing', start); v.removeEventListener('pause', stop); v.removeEventListener('ended', stop); };
   }, [i, pinned]);
-  useEffect(() => { if (bar.current) bar.current.style.transform = 'scaleX(0)'; }, [i]);
 
   // swipe the player
   const sx = useRef<number | null>(null);
@@ -89,7 +86,7 @@ export function HeroPlayer() {
 
   return (
     <div className="hp">
-      <Dither shape="radial" x={0.5} y={0.42} reach={0.62} max={0.85} cell={7} className="hp-dz" />
+      <Dither shape="radial" x={0.5} y={0.4} reach={0.55} max={0.6} cell={8} dot={1.5} className="hp-dz" />
       <div className="hp-stage" ref={box} onPointerDown={onDown} onPointerUp={onUp} onPointerCancel={() => { sx.current = null; }} style={{touchAction: 'pan-y'}}>
         <img key={tab.id} className="hp-poster" src={tab.poster} alt="" width={1280} height={720} fetchPriority={i === 0 ? 'high' : 'auto'} decoding="async" />
         {!still.current && (
@@ -104,7 +101,6 @@ export function HeroPlayer() {
         {TABS.map((t, n) => (
           <button key={t.id} id={`hp-tab-${t.id}`} role="tab" type="button" aria-selected={n === i} aria-controls="hp-cap" tabIndex={n === i ? 0 : -1} className={n === i ? 'on' : ''} onClick={() => go(n, 'tab')}>
             <span className="hp-name">{t.name}{t.tag && <i>{t.tag}</i>}</span>
-            <span className="hp-line" aria-hidden>{n === i && <b ref={(el) => { bar.current = el; }} />}</span>
           </button>
         ))}
       </div>

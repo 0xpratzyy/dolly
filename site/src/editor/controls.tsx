@@ -5,7 +5,7 @@ export function Slider({label, value, min, max, step, onChange, fmt, hint, disab
   const p = ((value - min) / (max - min)) * 100;
   return (
     <div className={`ctl${disabled ? ' off' : ''}`}>
-      <label className="ctl-l" htmlFor={id}><span>{label}{hint && <small>{hint}</small>}</span><b>{fmt ? fmt(value) : value}</b></label>
+      <label className="ctl-l" htmlFor={id} title={hint}><span>{label}</span><b>{fmt ? fmt(value) : value}</b></label>
       <input id={id} type="range" min={min} max={max} step={step} value={value} disabled={disabled} onChange={(e) => onChange(+e.target.value)} style={{'--p': `${p}%`} as React.CSSProperties} />
     </div>
   );
@@ -14,7 +14,7 @@ export function Slider({label, value, min, max, step, onChange, fmt, hint, disab
 export function Toggle({label, on, onChange, hint}: {label: string; on: boolean; onChange: (v: boolean) => void; hint?: string}) {
   return (
     <button type="button" role="switch" aria-checked={on} className="ctl tg" onClick={() => onChange(!on)}>
-      <span className="ctl-l"><span>{label}{hint && <small>{hint}</small>}</span></span>
+      <span className="ctl-l" title={hint}><span>{label}</span></span>
       <span className={`sw${on ? ' on' : ''}`} aria-hidden />
     </button>
   );
@@ -59,15 +59,5 @@ export function Colors({label, value, swatches, onChange}: {label: string; value
         </label>
       </div>
     </div>
-  );
-}
-
-export function Panel({title, hint, children}: {title?: string; hint?: string; children: React.ReactNode}) {
-  return (
-    <section className="grp">
-      {title && <h3>{title}</h3>}
-      {hint && <p className="hint">{hint}</p>}
-      <div className="grp-in">{children}</div>
-    </section>
   );
 }

@@ -1,9 +1,9 @@
 import React, {useMemo} from 'react';
 import {AbsoluteFill, Audio, Freeze, Img, OffthreadVideo, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
-import {buildTimeline, type Built, type FrameState} from './timeline.ts';
+import {buildTimeline, CHROME_BAR, type Built, type FrameState} from './timeline.ts';
 import {defaultSpotlightOptions, type SpotlightItem, type SpotlightOptions, type SpotlightProps} from './types.ts';
 import {SpotCursor} from './Cursor.tsx';
-import {DeskSlab, SceneBackground, sceneDark} from './scenes.tsx';
+import {SceneBackground, sceneDark} from './scenes.tsx';
 import {backgroundIsDark} from '../backgrounds.ts';
 
 const FONT = "'Figtree', ui-sans-serif, -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif";
@@ -27,6 +27,52 @@ function needsPlate(m: SpotlightItem['meta'], o: SpotlightOptions): boolean {
   return !covered;
 }
 const pad5 = (n: number) => String(n + 1).padStart(5, '0');
+const assetUrl = (item: SpotlightItem, file: string) => {
+  const root = item.base.startsWith('http') || item.base.startsWith('/') ? item.base : staticFile(item.base);
+  return `${root}/${file}`;
+};
+/** The component's painted box (image CSS px) at the capture frame shown. */
+const boxAt = (m: SpotlightItem['meta'], n: number) => m.bbox[Math.min(m.bbox.length - 1, n)] ?? [0, 0, m.image.cssW, m.image.cssH];
+const ICE = '134,228,240'; // #86E4F0, the one accent
+
+/** Beat 1: the real page the component lives in, as a quiet browser window; it dims, pushes back and fades as the component lifts. */
+const ContextPage: React.FC<{item: SpotlightItem; tl: Built; st: FrameState; u: number}> = ({item, tl, st, u}) => {
+  const m = item.meta, ctx = m.context!, p = tl.placed[0], s = p.s, clip = m.clip ?? {x: 0, y: 0, width: m.image.cssW, height: m.image.cssH};
+  const it = st.intro!;
+  const bar = CHROME_BAR * s, pw = ctx.w * s, ph = ctx.h * s;
+  const left = p.x - p.w / 2 - clip.x * s, top = p.y - p.h / 2 - clip.y * s - bar;
+  const b = boxAt(m, st.items[0].frame);
+  const ox = (clip.x + b[0] + b[2] / 2) * s, oy = bar + (clip.y + b[1] + b[3] / 2) * s;
+  let label = 'localhost';
+  try { const q = new URL(m.url ?? ''); if (/^https?:$/.test(q.protocol)) label = (q.host + q.pathname).replace(/\/$/, ''); } catch {}
+  const zr = 1 / Math.max(0.2, st.cam.zoom);
+  return (
+    <div style={{position: 'absolute', left, top, width: pw, height: ph + bar, borderRadius: 14 * s, overflow: 'hidden', background: '#0e0e10', opacity: it.page,
+      transformOrigin: `${ox}px ${oy}px`, transform: `translateZ(-1px) scale(${(1 - 0.045 * it.lift).toFixed(4)})`,
+      boxShadow: `inset 0 0 0 ${zr * u}px rgba(255,255,255,0.10), 0 ${50 * u}px ${140 * u}px rgba(0,0,0,0.55)`}}>
+      <div style={{position: 'absolute', left: 0, top: 0, width: pw, height: bar, background: '#161618', borderBottom: `${zr * u}px solid rgba(255,255,255,0.06)`}}>
+        {[0, 1, 2].map((k) => <div key={k} style={{position: 'absolute', left: (18 + k * 18) * s, top: bar / 2 - 5.5 * s, width: 11 * s, height: 11 * s, borderRadius: '50%', background: 'rgba(255,255,255,0.13)'}} />)}
+        <div style={{position: 'absolute', left: pw * 0.33, width: pw * 0.34, top: bar / 2 - 12 * s, height: 24 * s, borderRadius: 12 * s, background: 'rgba(255,255,255,0.055)', color: 'rgba(242,243,244,0.55)', fontSize: 12.5 * s, lineHeight: `${24 * s}px`, textAlign: 'center', fontFamily: FONT, letterSpacing: 0.1 * s}}>{label}</div>
+      </div>
+      <Img src={assetUrl(item, ctx.image)} style={{position: 'absolute', left: 0, top: bar, width: pw, height: ph, display: 'block', filter: `brightness(${it.dim.toFixed(3)})`}} />
+    </div>
+  );
+};
+
+/** The outline that says "this one": a soft ice-cyan ring around the component, drawn in as the page dims. */
+const ContextRing: React.FC<{item: SpotlightItem; tl: Built; st: FrameState; u: number}> = ({item, tl, st, u}) => {
+  const m = item.meta, p = tl.placed[0], s = p.s, it = st.intro!;
+  const b = boxAt(m, st.items[0].frame);
+  const zr = 1 / Math.max(0.2, st.cam.zoom);
+  const grow = 1 - Math.min(1, it.ring * 1.6); // tightens onto the component as it appears
+  const pad = (9 + 10 * grow) * s;
+  const r = Math.max(m.radius || 0, ...(m.cards?.[0] ?? []).map((c) => c[4]), 16) * s + pad;
+  return (
+    <div style={{position: 'absolute', left: p.x - p.w / 2 + b[0] * s - pad, top: p.y - p.h / 2 + b[1] * s - pad, width: b[2] * s + 2 * pad, height: b[3] * s + 2 * pad, borderRadius: r,
+      opacity: it.ring, border: `${1.5 * u * zr}px solid rgba(${ICE},0.9)`, boxSizing: 'border-box', transform: 'translateZ(1px)',
+      boxShadow: `0 0 ${18 * u * zr}px rgba(${ICE},0.32), inset 0 0 ${14 * u * zr}px rgba(${ICE},0.12)`, pointerEvents: 'none'}} />
+  );
+};
 
 export const resolveOptions = (p: Partial<SpotlightOptions>): SpotlightOptions => ({...defaultSpotlightOptions, ...p, cursor: {...defaultSpotlightOptions.cursor, ...(p.cursor ?? {})}});
 
@@ -44,12 +90,13 @@ export const Spotlight: React.FC<SpotlightProps> = (props) => {
 
   // motion blur: directional, from this frame's screen-space camera movement (world px -> screen px)
   const amt = clamp(o.motionBlur, 0, 1);
-  const bx = clamp(Math.abs(st.vel.x) * 0.55 * amt + Math.abs(st.vel.z) * W * 0.22 * amt + Math.abs(st.vel.rot) * 3 * amt, 0, 34 * u);
-  const by = clamp(Math.abs(st.vel.y) * 0.55 * amt + Math.abs(st.vel.z) * H * 0.12 * amt, 0, 20 * u);
-  const mb = bx > 0.4 || by > 0.4;
+  // zoom moves (the intro, the action push-in) are slow and must stay crisp: a flat gaussian is the wrong blur for a zoom anyway
+  const bx = clamp(Math.abs(st.vel.x) * 0.55 * amt + Math.abs(st.vel.z) * W * 0.03 * amt + Math.abs(st.vel.rot) * 3 * amt, 0, 34 * u);
+  const by = clamp(Math.abs(st.vel.y) * 0.55 * amt + Math.abs(st.vel.z) * H * 0.02 * amt, 0, 20 * u);
+  const mb = bx > 0.8 || by > 0.8;
 
   const textColor = dark ? '#f2f3f4' : '#17181a';
-  const reflection = o.reflection ?? (o.scene === 'void' || o.scene === 'curtain');
+  const reflection = o.reflection ?? o.scene === 'void';
 
   return (
     <AbsoluteFill style={{fontFamily: FONT, overflow: 'hidden', background: '#000'}}>
@@ -69,10 +116,11 @@ export const Spotlight: React.FC<SpotlightProps> = (props) => {
               transform: `rotateX(${cam.rx.toFixed(3)}deg) rotateY(${cam.ry.toFixed(3)}deg) rotateZ(${cam.rz.toFixed(3)}deg) scale(${cam.zoom.toFixed(5)}) translate3d(${(-cam.x).toFixed(2)}px, ${(-cam.y).toFixed(2)}px, 0)`,
             }}
           >
-            {o.scene === 'desk' && items.length === 1 && <DeskSlab item={items[0]} s={tl.placed[0].s} u={u} dark={dark} />}
+            {st.intro && st.intro.page > 0.002 && <ContextPage item={items[0]} tl={tl} st={st} u={u} />}
             {items.map((it, k) => (
-              <PlacedItem key={it.id} item={it} k={k} tl={tl} st={st} o={o} u={u} dark={dark} frame={frame} fps={fps} reflection={reflection && items.length === 1} light={!dark} />
+              <PlacedItem key={it.id} item={it} k={k} tl={tl} st={st} o={o} u={u} dark={dark} frame={frame} fps={fps} reflection={reflection && items.length === 1 && (!st.intro || st.intro.lift > 0.99)} light={!dark} />
             ))}
+            {st.intro && st.intro.ring > 0.002 && <ContextRing item={items[0]} tl={tl} st={st} u={u} />}
           </div>
         </div>
       </AbsoluteFill>
@@ -107,7 +155,9 @@ const PlacedItem: React.FC<{item: SpotlightItem; k: number; tl: Built; st: Frame
   const pressed = Math.max(c1[4], c2[4] * (f.mix > 0 ? 1 : 0));
   const kind = f.mix > 0.5 ? c2[3] : c1[3];
   const s = p.s;
-  const sh = o.shadow * (light ? 0.7 : 1);
+  // in the context intro the component starts flat in its page (no shadow) and gains its stage shadow as it lifts out
+  const lift = st.intro ? st.intro.lift : 1;
+  const sh = o.shadow * (light ? 0.7 : 1) * lift;
   const hh = p.h;
   const shadowCol = light ? '40,44,52' : '0,0,0';
   const filt = [

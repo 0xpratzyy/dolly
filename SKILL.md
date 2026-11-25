@@ -20,6 +20,65 @@ CONTRACT.md  events.json format
 
 First time: `cd autopilot && npm install && npx playwright install chromium`, and `cd ../studio && npm install`.
 
+## Make it good (read before you write a script or a plan)
+
+What the best product demos do, drawn from dissected demos in the Refs library (PostHog, CodeRabbit, Clerk, Framer, Figma, Jitter, Paper...).
+Apply it in Autopilot scripts, Narrate plans and Spotlight clips alike.
+
+**Pick the story first.**
+- One task, start to finish, with a visible result. "Turn a failed PR check into evidence and a rerun" beats "a tour of the dashboard".
+- 3 to 5 beats, never a feature list: **promise → 2-3 steps of how → the result → the end frame**. Each beat proves one thing.
+- Cover the feature that *changes something on screen* (a page builds, a chart fills, a list sorts, an answer appears). Skip settings,
+  onboarding, sign-in, empty states and anything that only shows a form.
+- Use real-looking data. An empty table or "No results" on camera kills it: seed it, pick a populated account, or show another page.
+- Length: 20-45 s for a feature, 45-60 s for a launch, 15-30 s for 9:16. Longer only if every beat still changes the picture.
+
+**The first 2 seconds.**
+- The viewer should know what this does by ~2 s: open on the result or the action (zoomed in on the thing being used), never on a
+  logo, a blank page or a loading state. Show the outcome first, then how you got there, when you can.
+- Put the promise in the first caption, in the viewer's words ("Ship a site from one prompt"), not the product's ("Introducing X 2.0").
+
+**Motion: the picture should almost never be still.**
+- Aim for 85%+ of frames moving and under ~10% still. Measured: a top launch film is 86% moving / 4% still; a static cut of the
+  same idea came out 55% / 24% and read as a slideshow even though every click was right.
+- No frame frozen for more than ~1.5 s. While a line is read, keep something moving: a slow scroll, a hover over the thing described, a
+  typing field, a list that fills. Narrate adds an ambient scroll after 3 s of nothing; a real action is always better.
+- Long continuous takes are fine (good demos often run 10-50 s without a cut) as long as the UI keeps changing inside them.
+  Few cuts, lots of state change.
+- Let animations finish: the driver holds 0.8 s after a small change and 1.5 s after a new page. Don't stack the next click on top.
+
+**When to zoom.**
+- Zoom when the thing that matters is small: a button, a field being typed into, a toggle, a number that changes, a menu item.
+  Pull out (or stay wide) when the whole layout changes: a new page, a panel opening, a grid filling.
+- The zoom must **arrive before the click** (the planner lands ~1 s before the first click and rests 160 ms on target). A zoom that
+  starts after the click feels late; fix it in `plan.json`, never by delaying the action.
+- 1.4-1.9x is the useful range (`zoom.amount` / `zooms[].scale`). Above ~2x the UI blurs and loses context.
+- Don't zoom every click: one zoom per beat, and glide between nearby targets (adjacent zooms join instead of pulling out and back in).
+  Two zooms within ~2 s on opposite sides of the screen read as jitter: merge them or keep the shot wide.
+- 9:16 has no auto zoom on purpose (the phone take is already close). Never zoom a portrait page sideways.
+
+**Cursor and clicks.**
+- One gentle arc per move, a short rest, then the press: no wandering, no circling, no hovering for the sake of it.
+- The cursor rests where the eye should be. Between actions it should not sit on top of the thing being read.
+- Real clicks only: the click sound and ripple belong to actual presses, never decoration.
+
+**Captions and text.**
+- One idea per caption, under 12 words, plain words, the same words the screen shows ("Click *Publish*", not "deploy your project").
+- `*word*` highlights one word per line at most: the result or the number.
+- A caption never covers what is being clicked: check the sheet, move it with `captions.position`.
+
+**The end.**
+- End on the finished result or one clear action (Publish, Run, the live page), held ~1.5-2 s, then the end frame. No fade into a logo
+  for 5 s; no "and much more" montage.
+
+**Sound.**
+- A steady music bed at about -14 LUFS with small accents on UI changes beats cutting to the beat. Voice, if any, at 110-130 words a
+  minute (Narrate keeps the user's own pace).
+
+**Before you hand it over, look at the sheets and ask:** does the first frame say what this is? Is anything frozen or empty? Does each
+zoom land before its click? Can every caption be read without hiding the action? Does it end on the result?
+If the Refs MCP is connected, `search_videos` finds real demos of the same kind to copy the shape from.
+
 ## Autopilot: URL -> video
 
 1. **Explore.** Open the URL yourself (Playwright, or any browser tool you have), click through the real product, and learn what

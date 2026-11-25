@@ -1,9 +1,7 @@
 import {Suspense, lazy, useEffect, useState} from 'react';
 import './editor.css';
-import {Header} from './App';
-import {SiteFooter} from './RefsFooter';
-import {SUBTLE_URL} from './consts';
 import {track} from './analytics';
+import {SlotCtx} from './editor/shell';
 
 const RecordTab = lazy(() => import('./editor/RecordTab'));
 const SpotlightSection = lazy(() => import('./spotlight/SpotlightSection'));
@@ -13,10 +11,16 @@ const TABS = [['record', 'Record'], ['spotlight', 'Spotlight'], ['narrate', 'Nar
 type TabId = (typeof TABS)[number][0];
 const fromUrl = (): TabId => { const t = new URLSearchParams(location.search).get('tab'); return TABS.some(([id]) => id === t) ? (t as TabId) : 'record'; };
 
-/** /editor: everything interactive. Three tabs (Record, Spotlight, Narrate), each ends in one filled Copy prompt button; the credits sit at the foot. */
+/** /editor: a full-screen app. A top bar (logo, the file, Record / Spotlight / Narrate, Export) over one workspace per mode. */
 export default function EditorPage() {
   const [tab, setTab] = useState<TabId>(fromUrl);
+  const [left, setLeft] = useState<HTMLElement | null>(null);
+  const [right, setRight] = useState<HTMLElement | null>(null);
   useEffect(() => { document.title = 'Editor · Dolly'; }, []);
+  useEffect(() => {
+    const h = document.documentElement; h.classList.add('ep-root');
+    return () => h.classList.remove('ep-root');
+  }, []);
   useEffect(() => { const on = () => setTab(fromUrl()); addEventListener('popstate', on); return () => removeEventListener('popstate', on); }, []);
   const pick = (t: TabId) => {
     setTab(t); track('dolly_editor_tab', {tab: t});
@@ -29,29 +33,29 @@ export default function EditorPage() {
     pick(n); requestAnimationFrame(() => document.getElementById(`ep-tab-${n}`)?.focus());
   };
   return (
-    <>
-      <Header editor />
-      <main className="ep">
-        <div className="ep-bar">
-          <div className="ep-tabs" role="tablist" aria-label="Editor" onKeyDown={onKey}>
-            {TABS.map(([id, name]) => (
-              <button key={id} id={`ep-tab-${id}`} role="tab" type="button" aria-selected={tab === id} aria-controls="ep-panel" tabIndex={tab === id ? 0 : -1} className={tab === id ? 'on' : ''} onClick={() => pick(id)}>{name}</button>
-            ))}
-          </div>
-          <p className="ep-note">The editor is easier on a laptop.</p>
+    <div className="ep">
+      <header className="ep-top">
+        <div className="ep-l">
+          <a className="ep-brand" href="/" aria-label="Dolly home"><span className="mark" aria-hidden /><span className="wm">dolly</span></a>
+          <span className="ep-div" aria-hidden />
+          <div className="ep-slot" ref={setLeft} />
         </div>
-        <div id="ep-panel" role="tabpanel" aria-labelledby={`ep-tab-${tab}`}>
-          <Suspense fallback={<div className="ep-load" aria-busy="true" />}>
+        <div className="ep-modes" role="tablist" aria-label="Mode" onKeyDown={onKey}>
+          {TABS.map(([id, name]) => (
+            <button key={id} id={`ep-tab-${id}`} role="tab" type="button" aria-selected={tab === id} aria-controls="ep-panel" tabIndex={tab === id ? 0 : -1} className={tab === id ? 'on' : ''} onClick={() => pick(id)}>{name}</button>
+          ))}
+        </div>
+        <div className="ep-r" ref={setRight} />
+      </header>
+      <SlotCtx.Provider value={{left, right}}>
+        <main id="ep-panel" className="ep-main" role="tabpanel" aria-labelledby={`ep-tab-${tab}`}>
+          <Suspense fallback={<div className="ws ws-skel" aria-busy="true"><div className="stage" /><aside className="insp" /></div>}>
             {tab === 'record' && <RecordTab />}
             {tab === 'spotlight' && <SpotlightSection />}
             {tab === 'narrate' && <NarrateSection />}
           </Suspense>
-        </div>
-        <p className="ep-credits">
-          Space photos in the background picker are NASA images, public domain, shown with credit: Artemis II "A Breathtaking Earthset from Orion" (NASA, 2026), Apollo 11 earthrise (NASA, AS11-44-6549), the Webb "Cosmic Cliffs" (NASA, ESA, CSA, STScI) and Blue Marble 2012 (NASA Earth Observatory, NOAA, Suomi NPP). NASA does not endorse Dolly. The 12 AI wallpapers are original images generated for Dolly. Subtitles use <a href={SUBTLE_URL} target="_blank" rel="noopener noreferrer">Subtle</a>'s caption engine.
-        </p>
-      </main>
-      <SiteFooter />
-    </>
+        </main>
+      </SlotCtx.Provider>
+    </div>
   );
 }

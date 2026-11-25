@@ -2,7 +2,8 @@ import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useS
 import {Player, type PlayerRef} from '@remotion/player';
 import {loadCaptionFonts, type Timeline, type Style, type Plan, type Zoom} from '@studio/lib.ts';
 import {DollyLive} from './DollyLive';
-import {CAPTION_STYLES, FPS, PLAN, POSTER, SRC_ASPECT, VIDEO, toCaptions} from '../data';
+import {CAPTION_STYLES, SRC_ASPECT, toCaptions} from '../data';
+import {useClip} from '../clip';
 import {Icon} from '../ui';
 import {clamp, lowerBound} from './state';
 
@@ -53,7 +54,7 @@ function useFit(ratio: number) {
   useLayoutEffect(() => {
     const el = ref.current; if (!el) return;
     const measure = () => {
-      const cw = el.clientWidth - 24, ch = el.clientHeight - 24;
+      const cw = el.clientWidth - 64, ch = el.clientHeight - 48; // breathing room around the preview
       if (cw <= 0 || ch <= 0) return;
       const w = cw / ch > ratio ? ch * ratio : cw;
       setSize((s) => (Math.abs(s.w - w) < 0.5 ? s : {w: Math.floor(w), h: Math.floor(w / ratio)}));
@@ -72,6 +73,8 @@ export interface StageProps {
 }
 
 export function Stage({tl, style, plan, lines, t, wipe, setWipe, pick, onPickMove, onPickEnd}: StageProps) {
+  const clip = useClip();
+  const PLAN = clip.plan, FPS = clip.fps, VIDEO = clip.video, POSTER = clip.poster;
   const L = tl.layout;
   const ratio = L.canvasW / L.canvasH;
   const fit = useFit(ratio);
@@ -79,9 +82,9 @@ export function Stage({tl, style, plan, lines, t, wipe, setWipe, pick, onPickMov
   const raw = useRef<HTMLVideoElement>(null);
   const box = useRef<HTMLDivElement>(null);
 
-  const captions = useMemo(() => toCaptions(lines), [lines]);
+  const captions = useMemo(() => toCaptions(lines, clip.lineTimes), [lines, clip.lineTimes]);
   const captionStyle = useMemo(() => (style.captions.enabled ? CAPTION_STYLES[style.captions.style] : undefined), [style.captions.enabled, style.captions.style]);
-  const inputProps = useMemo(() => ({video: VIDEO, plan, style, captions, captionStyle, _f: fontTick}), [plan, style, captions, captionStyle, fontTick]);
+  const inputProps = useMemo(() => ({video: VIDEO, plan, style, captions, captionStyle, _f: fontTick}), [VIDEO, plan, style, captions, captionStyle, fontTick]);
 
   useEffect(() => {
     if (!captionStyle) return;
@@ -183,7 +186,7 @@ export function Stage({tl, style, plan, lines, t, wipe, setWipe, pick, onPickMov
               style={{width: '100%', height: '100%'}}
               posterFillMode="player-size"
               errorFallback={() => <div className="err">The preview couldn't load.</div>}
-              renderLoading={() => <div className="loading"><img src={POSTER} alt="" /></div>}
+              renderLoading={() => <div className="loading">{POSTER && <img src={POSTER} alt="" />}</div>}
             />
           </div>
           <MountSignal onMount={t.onMount} />
@@ -211,7 +214,7 @@ export function Stage({tl, style, plan, lines, t, wipe, setWipe, pick, onPickMov
           )}
         </div>
       )}
-      {fit.w === 0 && <img className="stage-ph" src={POSTER} alt="" />}
+      {fit.w === 0 && POSTER && <img className="stage-ph" src={POSTER} alt="" />}
     </div>
   );
 }

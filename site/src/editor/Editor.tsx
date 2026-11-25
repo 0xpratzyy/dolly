@@ -1,27 +1,30 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
 import {buildTimeline, mergeStyle, stylePresets, type Zoom} from '@studio/lib.ts';
-import {BASE, FPS, PLAN} from '../data';
+import {useClip, exportPlan} from '../clip';
 import {track} from '../analytics';
-import {Icon} from '../ui';
 import type {CopyBtn} from '../copy';
 import {zoomsJson} from '../prompt';
 import {Inspector, type TabId} from './Inspector';
 import {Stage, useTransport} from './Stage';
 import {Timeline, newZoomAt} from './Timeline';
-import {ORIGINAL, clamp, encodeEdit, type useEdit} from './state';
+import {clamp, encodeEdit, originalOf, type useEdit} from './state';
+import {FileMenu, OpenNotice, DropZone, type OpenApi} from './Open';
+import {RecordExport} from './Export';
+import {PhoneNote, TopSlot} from './shell';
 
 const timers: Record<string, number> = {};
 const tweaked = (what: string) => { clearTimeout(timers[what]); timers[what] = window.setTimeout(() => track('dolly_tweaked', {what}), 600); }; // a drag is one event
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.matches('input, textarea, select, [contenteditable="true"]') && !(el instanceof HTMLInputElement && ['button', 'checkbox', 'radio'].includes(el.type)));
 
-interface Props {ed: ReturnType<typeof useEdit>; CopyBtn: CopyBtn; prompt: string; json: string}
+interface Props {ed: ReturnType<typeof useEdit>; CopyBtn: CopyBtn; prompt: string; json: string; open: OpenApi}
 
-export default function Editor({ed, CopyBtn, prompt, json}: Props) {
+export default function Editor({ed, CopyBtn, prompt, json, open}: Props) {
+  const clip = useClip();
+  const PLAN = clip.plan, FPS = clip.fps, BASE = clip.base;
   const {edit, commit, undo, redo, canUndo, canRedo} = ed;
   const {style, zooms, lines} = edit;
-  const [tab, setTab] = useState<TabId>('background');
+  const [tab, setTab] = useState<TabId>('look');
   const [sel, setSel] = useState<string | null>(null);
-  const [adv, setAdv] = useState(false); // the Advanced disclosure
   const [pick, setPick] = useState(false);
 
   const plan = useMemo(() => ({...PLAN, zooms}), [zooms]);
@@ -45,8 +48,8 @@ export default function Editor({ed, CopyBtn, prompt, json}: Props) {
   const onLook = useCallback((name: string) => {
     commit((e) => ({...e, style: mergeStyle(BASE, stylePresets[name] ?? {}, {captions: e.style.captions})}));
     track('dolly_look', {look: name});
-  }, [commit]);
-  const onReset = useCallback(() => { commit(() => ORIGINAL); setSel(null); setPick(false); track('dolly_reset'); }, [commit]);
+  }, [commit, BASE]);
+  const onReset = useCallback(() => { commit(() => originalOf(clip)); setSel(null); setPick(false); track('dolly_reset'); }, [commit, clip]);
 
   const patchZoom = useCallback((id: string, p: Partial<Zoom>, key: string) => {
     commit((e) => {
@@ -61,7 +64,7 @@ export default function Editor({ed, CopyBtn, prompt, json}: Props) {
       return {...e, zooms: e.zooms.map((z) => (z.id === id ? n : z))};
     }, key);
     tweaked('zoom-edit');
-  }, [commit]);
+  }, [commit, PLAN]);
   const patchFromInspector = useCallback((id: string, p: Partial<Zoom>, key: string) => {
     patchZoom(id, p, key);
     // show the result: park the playhead inside the zoom's hold
@@ -70,17 +73,17 @@ export default function Editor({ed, CopyBtn, prompt, json}: Props) {
   }, [patchZoom, zooms, t]);
   const select = useCallback((id: string | null) => {
     setSel(id);
-    if (id) { setAdv(true); setTab('camera'); const z = zooms.find((x) => x.id === id); if (z) { t.pause(); t.seekSrc(holdMid(z)); } }
+    if (id) { setTab('camera'); const z = zooms.find((x) => x.id === id); if (z) { t.pause(); t.seekSrc(holdMid(z)); } }
   }, [zooms, t]);
   const addZoom = useCallback(() => {
-    let z = newZoomAt(t.srcNow());
+    let z = newZoomAt(t.srcNow(), PLAN);
     const hit = () => zooms.find((o) => o.startMs < z.endMs && o.endMs > z.startMs);
     for (let i = 0; i < 6 && hit(); i++) { const h = hit()!; const len = z.endMs - z.startMs; z = {...z, startMs: h.endMs + 150, endMs: h.endMs + 150 + len}; }
     if (hit() || z.endMs > PLAN.source.durationMs) return;
     commit((e) => ({...e, zooms: [...e.zooms, z].sort((a, b) => a.startMs - b.startMs)}));
-    setSel(z.id); setAdv(true); setTab('camera'); t.pause(); t.seekSrc(holdMid(z));
+    setSel(z.id); setTab('camera'); t.pause(); t.seekSrc(holdMid(z));
     track('dolly_zoom_add');
-  }, [commit, t, zooms]);
+  }, [commit, t, zooms, PLAN]);
   const removeZoom = useCallback(() => {
     if (!sel) return;
     commit((e) => ({...e, zooms: e.zooms.filter((z) => z.id !== sel)}));
@@ -91,7 +94,7 @@ export default function Editor({ed, CopyBtn, prompt, json}: Props) {
   // ---- focus picker
   const startPick = useCallback(() => { if (!selZoom) return; t.pause(); t.seekSrc(selZoom.startMs); setPick(true); }, [selZoom, t]);
   const endPick = useCallback(() => { setPick(false); if (selZoom) t.seekSrc(holdMid(selZoom)); }, [selZoom, t]);
-  const onPickMove = useCallback((c: {x: number; y: number}) => { if (sel) patchZoom(sel, {center: {x: clamp(c.x, 0, PLAN.source.width), y: clamp(c.y, 0, PLAN.source.height)}}, 'pick:' + sel); }, [sel, patchZoom]);
+  const onPickMove = useCallback((c: {x: number; y: number}) => { if (sel) patchZoom(sel, {center: {x: clamp(c.x, 0, PLAN.source.width), y: clamp(c.y, 0, PLAN.source.height)}}, 'pick:' + sel); }, [sel, patchZoom, PLAN]);
 
   // ---- keyboard
   useEffect(() => {
@@ -117,38 +120,32 @@ export default function Editor({ed, CopyBtn, prompt, json}: Props) {
   const link = useCallback(() => { const h = encodeEdit(edit); return `${location.origin}${location.pathname}${h ? `#e=${h}` : ''}`; }, [edit]);
   const download = () => {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([zoomsJson(zooms)], {type: 'application/json'}));
-    a.download = 'plan-edits.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-    track('dolly_plan_download');
+    a.href = URL.createObjectURL(new Blob([clip.demo ? zoomsJson(zooms) : exportPlan(clip, zooms, style)], {type: 'application/json'}));
+    a.download = clip.demo ? 'plan-edits.json' : 'plan.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    track('dolly_plan_download', {own: !clip.demo});
   };
 
   const L = tl.layout;
-  const main = useRef<HTMLDivElement>(null);
-  const root = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = main.current; if (!el) return;
-    const ro = new ResizeObserver(() => root.current?.style.setProperty('--stick-h', `${el.offsetHeight}px`)); ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  const secs = Math.round(PLAN.source.durationMs / 1000);
   return (
-    <div className="ed" aria-label="Dolly editor" ref={root}>
-      <div className="ed-main" ref={main}>
-        <div className="app-bar">
-          <span className="dots" aria-hidden><i /><i /><i /></span>
-          <span className="app-title">refs-tour.mp4<em>demo recording · {Math.round(PLAN.source.durationMs / 1000)} s</em></span>
-          <span className="tl-sp" />
-          <span className="app-meta">{L.canvasW}×{L.canvasH}</span>
+    <DropZone open={open}>
+      <div className="ws ws-rec" aria-label="Dolly editor">
+        <TopSlot at="left"><FileMenu open={open} name={clip.name} meta={`${clip.demo ? 'Demo' : 'Yours'} · ${secs} s · ${L.canvasW}×${L.canvasH}`} demo={clip.demo} /></TopSlot>
+        <TopSlot at="right">
+          <RecordExport style={style} zooms={zooms} canvas={`${L.canvasW}×${L.canvasH}`} frames={tl.frames.length} CopyBtn={CopyBtn} prompt={prompt} json={json} link={link} onDownload={download} />
+        </TopSlot>
+        <div className="ws-stage">
+          <OpenNotice open={open} />
+          <Stage tl={tl} style={style} plan={plan} lines={lines} t={t} wipe={null} setWipe={() => {}} pick={pick ? selZoom ?? null : null} onPickMove={onPickMove} onPickEnd={endPick} />
         </div>
-        <Stage tl={tl} style={style} plan={plan} lines={lines} t={t} wipe={null} setWipe={() => {}} pick={pick ? selZoom ?? null : null} onPickMove={onPickMove} onPickEnd={endPick} />
-        <Timeline lite={!adv} t={t} tl={tl} zooms={zooms} sel={sel} lines={lines} captionsOn={style.captions.enabled} onSelect={select} onPatch={patchZoom} onAdd={addZoom} onDelete={removeZoom}
-          onCaptions={() => { setAdv(true); setTab('subtitles'); }} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} />
+        <Inspector
+          tab={tab} setTab={setTab} style={style} sel={selZoom} set={set} patchZoom={patchFromInspector} onPick={startPick} onRemove={removeZoom} onAdd={addZoom}
+          lines={lines} setLines={setLines} onLook={onLook} onReset={onReset}
+        />
+        <Timeline t={t} tl={tl} zooms={zooms} sel={sel} lines={lines} captionsOn={style.captions.enabled} onSelect={select} onPatch={patchZoom} onAdd={addZoom} onDelete={removeZoom}
+          onCaptions={() => setTab('captions')} onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} />
+        <PhoneNote><CopyBtn id="prompt" text={prompt} label="Copy prompt for Claude Code" primary big /></PhoneNote>
       </div>
-      <Inspector
-        tab={tab} setTab={setTab} style={style} zooms={zooms} sel={selZoom} set={set} patchZoom={patchFromInspector} onPick={startPick} onRemove={removeZoom} onAdd={addZoom}
-        lines={lines} setLines={setLines} onLook={onLook} onReset={onReset}
-        canvas={`${L.canvasW}×${L.canvasH}`} frames={tl.frames.length} CopyBtn={CopyBtn as any} prompt={prompt} json={json} link={link} onDownload={download}
-        adv={adv} setAdv={setAdv}
-      />
-    </div>
+    </DropZone>
   );
 }

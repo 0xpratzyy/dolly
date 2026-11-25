@@ -1,11 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // Production config for later. Deliberately has no route: attach dolly.refs.video only when the owner says so, by
-  // uncommenting the line below. Until then use wrangler.dev.jsonc (dolly-site-dev on workers.dev).
+  // Production: dolly.refs.video (live since 2026-11-25, owner: "do everything public we are going live").
+  // wrangler.dev.jsonc is the private review copy on workers.dev.
   "name": "dolly-site",
   "main": "worker.js",
   "compatibility_date": "2026-11-01",
-  // "routes": [{ "pattern": "dolly.refs.video", "custom_domain": true }],
+  "routes": [{ "pattern": "dolly.refs.video", "custom_domain": true }],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",

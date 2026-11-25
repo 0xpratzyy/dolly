@@ -1,12 +1,14 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {mergeStyle, type Style, type Zoom} from '@studio/types.ts';
 import {BASE, DEFAULT_LINES, PLAN} from '../data';
+import type {Clip} from '../clip';
 
 export interface Edit {style: Style; zooms: Zoom[]; lines: string[]}
+export const originalOf = (c: Clip): Edit => ({style: c.base, zooms: c.plan.zooms, lines: c.lines});
 export const ORIGINAL: Edit = {style: BASE, zooms: PLAN.zooms, lines: DEFAULT_LINES};
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-export const zoomsChanged = (z: Zoom[]) => !same(z, PLAN.zooms);
+export const zoomsChanged = (z: Zoom[], base: Zoom[] = PLAN.zooms) => !same(z, base);
 
 // ---- share link: only what differs from the defaults, base64url JSON in the URL hash (#e=...)
 const b64 = {
@@ -39,8 +41,8 @@ export function decodeEdit(hash: string): Edit | null {
 }
 
 /** The editor's document: style + zoom edits + subtitle lines, with undo / redo and the URL hash kept in step. */
-export function useEdit() {
-  const [edit, setEdit] = useState<Edit>(() => (typeof location !== 'undefined' && decodeEdit(location.hash)) || ORIGINAL);
+export function useEdit(clip: Clip) {
+  const [edit, setEdit] = useState<Edit>(() => (clip.demo && typeof location !== 'undefined' && decodeEdit(location.hash)) || originalOf(clip));
   const past = useRef<Edit[]>([]);
   const future = useRef<Edit[]>([]);
   const last = useRef({key: '', t: 0});
@@ -72,12 +74,13 @@ export function useEdit() {
   }, []);
 
   useEffect(() => {
+    if (!clip.demo) return; // the share link only describes the demo clip
     const t = setTimeout(() => {
       const h = encodeEdit(edit);
       try { history.replaceState(null, '', h ? `#e=${h}` : location.pathname + location.search); } catch { /* sandboxed */ }
     }, 400);
     return () => clearTimeout(t);
-  }, [edit]);
+  }, [edit, clip.demo]);
 
   return {edit, commit, undo, redo, canUndo: past.current.length > 0, canRedo: future.current.length > 0};
 }

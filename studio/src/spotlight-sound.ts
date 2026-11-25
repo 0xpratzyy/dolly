@@ -1,6 +1,8 @@
-// Synthesised UI sounds for Spotlight: hover tick, press, release, toggle, open / close whoosh, success chime, key tick.
-// Procedural and deterministic (seeded noise, no samples), written to a wav in node. Mixed at a tasteful level: the loudest
-// event peaks around -9 dBFS and nothing is harsh (the top end is rolled off).
+// UI sounds for Spotlight and the demo renderer: real recorded clicks only (a mouse button's press and release, a key
+// tap). No synthesised whooshes, chimes or hover ticks: a capture's other sound hints (tick, open, close, toggle,
+// success) are ignored. The samples are CC0 recordings in ../assets/sounds (see CREDITS.md there), mono 48 kHz,
+// trimmed and peak-normalised; they are mixed quietly, with a little per-click variation in level, pitch and pan so
+// repeated clicks don't sound machine-gunned.
 
 const SR = 48000;
 export type SoundMode = 'off' | 'subtle' | 'full';
@@ -8,107 +10,63 @@ export interface SoundEvent {tMs: number; kind: string}
 
 const mulberry = (seed: number) => () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 
-class Biquad {
-  b0 = 0; b1 = 0; b2 = 0; a1 = 0; a2 = 0; x1 = 0; x2 = 0; y1 = 0; y2 = 0;
-  set(type: 'bp' | 'lp' | 'hp', f: number, q: number) {
-    const w = (2 * Math.PI * Math.min(f, SR * 0.45)) / SR, c = Math.cos(w), al = Math.sin(w) / (2 * q);
-    let b0, b1, b2;
-    if (type === 'bp') { b0 = al; b1 = 0; b2 = -al; } else if (type === 'lp') { b0 = (1 - c) / 2; b1 = 1 - c; b2 = (1 - c) / 2; } else { b0 = (1 + c) / 2; b1 = -(1 + c); b2 = (1 + c) / 2; }
-    const a0 = 1 + al;
-    this.b0 = b0 / a0; this.b1 = b1 / a0; this.b2 = b2 / a0; this.a1 = (-2 * c) / a0; this.a2 = (1 - al) / a0;
-    return this;
+/** The sample each event kind plays, and its level before the mode's master gain. Anything else is silent. */
+const KINDS: Record<string, {file: string; gain: number}> = {
+  // press and release are cut from one recording and keep their natural balance (the release ~10 dB softer)
+  press: {file: 'press.wav', gain: 0.45},
+  release: {file: 'release.wav', gain: 0.45},
+  key: {file: 'key.wav', gain: 0.2},
+};
+
+const cache = new Map<string, Float32Array>();
+/** A 16-bit mono 48 kHz wav from assets/sounds as floats (read once). */
+function sample(file: string): Float32Array {
+  const hit = cache.get(file);
+  if (hit) return hit;
+  // node only (the renderers run there); getBuiltinModule keeps this file importable by the browser bundle
+  const fs = (process as unknown as {getBuiltinModule(id: string): typeof import('node:fs')}).getBuiltinModule('node:fs');
+  const buf = fs.readFileSync(new URL(`../assets/sounds/${file}`, import.meta.url));
+  let off = 12, data: Buffer | undefined;
+  while (off + 8 <= buf.length) {
+    const id = buf.toString('ascii', off, off + 4), size = buf.readUInt32LE(off + 4);
+    if (id === 'data') { data = buf.subarray(off + 8, off + 8 + size); break; }
+    off += 8 + size + (size & 1);
   }
-  p(x: number) { const y = this.b0 * x + this.b1 * this.x1 + this.b2 * this.x2 - this.a1 * this.y1 - this.a2 * this.y2; this.x2 = this.x1; this.x1 = x; this.y2 = this.y1; this.y1 = y; return y; }
+  if (!data) throw new Error(`no audio data in ${file}`);
+  const out = new Float32Array(data.length >> 1);
+  for (let i = 0; i < out.length; i++) out[i] = data.readInt16LE(i * 2) / 32768;
+  cache.set(file, out);
+  return out;
 }
-
-const env = (t: number, att: number, dec: number) => (t < att ? Math.sin((t / att) * Math.PI / 2) : Math.exp(-(t - att) / dec));
-
-/** One sound as mono samples, peak about 1 before gain. */
-function voice(kind: string, rnd: () => number): Float32Array {
-  const dur = ({tick: 0.06, press: 0.14, release: 0.07, toggle: 0.2, open: 0.44, close: 0.32, success: 1.0, key: 0.05} as Record<string, number>)[kind] ?? 0.1;
-  const n = Math.floor(dur * SR), o = new Float32Array(n);
-  const bp = new Biquad(), lp = new Biquad().set('lp', 9000, 0.7);
-  let ph = 0, ph2 = 0;
-  for (let i = 0; i < n; i++) {
-    const t = i / SR, noise = rnd() * 2 - 1;
-    let v = 0;
-    switch (kind) {
-      case 'tick': {
-        v = bp.set('bp', 3400, 2.2).p(noise) * 1.2 * env(t, 0.0004, 0.003);
-        ph += (2 * Math.PI * 2300) / SR; v += Math.sin(ph) * 0.45 * env(t, 0.0005, 0.007);
-        break;
-      }
-      case 'press': {
-        const f = 90 + 130 * Math.exp(-t / 0.026); ph += (2 * Math.PI * f) / SR;
-        v = Math.sin(ph) * 0.95 * env(t, 0.0008, 0.034) + bp.set('bp', 1900, 1.6).p(noise) * 0.85 * env(t, 0.0003, 0.0035);
-        break;
-      }
-      case 'release': {
-        const f = 900 + 520 * Math.exp(-t / 0.012); ph += (2 * Math.PI * f) / SR;
-        v = Math.sin(ph) * 0.5 * env(t, 0.0005, 0.011) + bp.set('bp', 4200, 2).p(noise) * 0.4 * env(t, 0.0003, 0.002);
-        break;
-      }
-      case 'toggle': {
-        const a = t, b = t - 0.058;
-        ph += (2 * Math.PI * 560) / SR; ph2 += (2 * Math.PI * 840) / SR;
-        v = Math.sin(ph) * 0.8 * env(a, 0.001, 0.02) + (b > 0 ? Math.sin(ph2) * 0.8 * env(b, 0.001, 0.028) : 0) + bp.set('bp', 2600, 1.4).p(noise) * 0.25 * (env(a, 0.0003, 0.003) + (b > 0 ? env(b, 0.0003, 0.003) : 0));
-        break;
-      }
-      case 'open': { // airy swell, sweeping up, with a soft low bloop
-        const k = Math.min(1, t / 0.26), f = 500 * Math.pow(6.4, k);
-        v = bp.set('bp', f, 0.9).p(noise) * 2.2 * (t < 0.15 ? Math.pow(Math.sin((t / 0.15) * Math.PI / 2), 2) : Math.exp(-(t - 0.15) / 0.09));
-        ph += (2 * Math.PI * (330 + 110 * Math.min(1, t / 0.12))) / SR; v += Math.sin(ph) * 0.45 * env(t, 0.004, 0.05);
-        break;
-      }
-      case 'close': {
-        const k = Math.min(1, t / 0.2), f = 3000 * Math.pow(0.17, k);
-        v = bp.set('bp', f, 0.9).p(noise) * 2.0 * env(t, 0.018, 0.075);
-        ph += (2 * Math.PI * (430 - 120 * Math.min(1, t / 0.12))) / SR; v += Math.sin(ph) * 0.4 * env(t, 0.003, 0.045);
-        break;
-      }
-      case 'success': { // a soft major triad, staggered, with a little second harmonic
-        const notes = [[880, 0], [1108.7, 0.07], [1318.5, 0.14]];
-        for (let q = 0; q < notes.length; q++) {
-          const tt = t - notes[q][1]; if (tt < 0) continue;
-          const f = notes[q][0], e = env(tt, 0.004, 0.24 - q * 0.02);
-          v += (Math.sin(2 * Math.PI * f * tt) + 0.22 * Math.sin(2 * Math.PI * f * 2 * tt) + 0.06 * Math.sin(2 * Math.PI * f * 3 * tt)) * 0.42 * e;
-        }
-        break;
-      }
-      case 'key': {
-        const f = 1500 + 800 * (rnd() * 0 + 0.5);
-        ph += (2 * Math.PI * f) / SR; v = bp.set('bp', 2800, 1.8).p(noise) * 0.9 * env(t, 0.0003, 0.0025) + Math.sin(ph) * 0.2 * env(t, 0.0004, 0.004);
-        break;
-      }
-    }
-    o[i] = lp.p(v);
-  }
-  return o;
-}
-
-const GAIN: Record<string, number> = {tick: 0.2, press: 0.46, release: 0.2, toggle: 0.4, open: 0.34, close: 0.28, success: 0.3, key: 0.14};
 
 /** Mix the events onto a stereo timeline of `durationMs`. `events[].tMs` is output time. */
 export function renderSounds(events: SoundEvent[], durationMs: number, mode: SoundMode, seed = 1): {left: Float32Array; right: Float32Array} {
   const n = Math.ceil((durationMs / 1000 + 0.6) * SR);
   const L = new Float32Array(n), R = new Float32Array(n);
   if (mode === 'off') return {left: L, right: R};
-  const master = mode === 'subtle' ? 0.55 : 1;
-  const skip = mode === 'subtle' ? new Set(['release', 'key', 'tick']) : new Set<string>();
+  const master = mode === 'subtle' ? 0.6 : 1;
   const last: Record<string, number> = {};
   const rnd = mulberry(seed);
   for (const e of [...events].sort((a, b) => a.tMs - b.tMs)) {
-    if (skip.has(e.kind) || !GAIN[e.kind]) continue;
+    const k = KINDS[e.kind];
+    if (!k) continue;
+    // a burst of identical events (key repeat, a drag's repeated presses) plays once per 30-60 ms
     if (last[e.kind] !== undefined && e.tMs - last[e.kind] < (e.kind === 'key' ? 30 : 60)) continue;
     last[e.kind] = e.tMs;
-    const v = voice(e.kind, mulberry(Math.floor(e.tMs * 7) + seed));
-    const pan = (rnd() - 0.5) * 0.24, gl = Math.cos((pan + 0.5) * Math.PI / 2) * 1.414 * 0.75, gr = Math.sin((pan + 0.5) * Math.PI / 2) * 1.414 * 0.75;
-    const g = GAIN[e.kind] * master * (0.92 + rnd() * 0.16);
+    const v = sample(k.file);
+    const rate = 0.96 + rnd() * 0.08; // ±4 % pitch, by resampling
+    const pan = (rnd() - 0.5) * 0.2, gl = Math.cos((pan + 0.5) * Math.PI / 2) * 1.414, gr = Math.sin((pan + 0.5) * Math.PI / 2) * 1.414;
+    const g = k.gain * master * (0.9 + rnd() * 0.2);
     const start = Math.max(0, Math.floor((e.tMs / 1000) * SR));
-    for (let i = 0; i < v.length && start + i < n; i++) { L[start + i] += v[i] * g * gl; R[start + i] += v[i] * g * gr; }
+    const len = Math.floor((v.length - 1) / rate);
+    for (let i = 0; i < len && start + i < n; i++) {
+      const p = i * rate, j = Math.floor(p), f = p - j, s = v[j] + (v[j + 1] - v[j]) * f;
+      L[start + i] += s * g * gl;
+      R[start + i] += s * g * gr;
+    }
   }
-  // gentle soft clip and a ceiling at about -4 dBFS
-  for (let i = 0; i < n; i++) { L[i] = Math.tanh(L[i] * 1.1) * 0.85; R[i] = Math.tanh(R[i] * 1.1) * 0.85; }
+  // a ceiling at about -3 dBFS for the rare pile-up (a press landing on a key tap)
+  for (let i = 0; i < n; i++) { L[i] = Math.tanh(L[i]) * 0.7; R[i] = Math.tanh(R[i]) * 0.7; }
   return {left: L, right: R};
 }
 

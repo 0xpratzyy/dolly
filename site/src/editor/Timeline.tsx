@@ -1,15 +1,17 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import type {Timeline as TL, Zoom} from '@studio/lib.ts';
-import {FPS, LINE_TIMES, PLAN} from '../data';
+import {useClip} from '../clip';
+import type {Plan} from '@studio/lib.ts';
 import {Icon, fmtTime} from '../ui';
 import {clamp} from './state';
+import {Popover, SIcon} from './shell';
 import type {Transport} from './Stage';
 
-const DUR = PLAN.source.durationMs;
 const STRIP_N = 30;
 const fmtMs = (ms: number) => `${fmtTime(ms / 1000)}.${Math.floor((ms % 1000) / 100)}`;
 
-export function newZoomAt(srcMs: number): Zoom {
+export function newZoomAt(srcMs: number, PLAN: Plan): Zoom {
+  const DUR = PLAN.source.durationMs;
   const cur = PLAN.cursorRaw.length ? PLAN.cursorRaw : PLAN.cursor;
   let lo = 0, hi = cur.length - 1;
   while (lo < hi) { const m = (lo + hi) >> 1; if (cur[m][0] < srcMs) lo = m + 1; else hi = m; }
@@ -19,14 +21,15 @@ export function newZoomAt(srcMs: number): Zoom {
 }
 
 interface Props {
-  lite?: boolean; // the collapsed view: clip strip and zoom row only (the clicks and subtitle rows show under Advanced)
   t: Transport; tl: TL; zooms: Zoom[]; sel: string | null; lines: string[]; captionsOn: boolean;
   onSelect: (id: string | null) => void; onPatch: (id: string, p: Partial<Zoom>, key: string) => void;
   onAdd: () => void; onDelete: () => void; onCaptions: () => void;
   onUndo: () => void; onRedo: () => void; canUndo: boolean; canRedo: boolean;
 }
 
-export function Timeline({lite, t, tl, zooms, sel, lines, captionsOn, onSelect, onPatch, onAdd, onDelete, onCaptions, onUndo, onRedo, canUndo, canRedo}: Props) {
+export function Timeline({t, tl, zooms, sel, lines, captionsOn, onSelect, onPatch, onAdd, onDelete, onCaptions, onUndo, onRedo, canUndo, canRedo}: Props) {
+  const clip = useClip();
+  const PLAN = clip.plan, FPS = clip.fps, DUR = PLAN.source.durationMs, LINE_TIMES = clip.lineTimes;
   const track = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(800);
   const frame = t.useFrame();
@@ -101,32 +104,48 @@ export function Timeline({lite, t, tl, zooms, sel, lines, captionsOn, onSelect, 
   }, [zooms]);
 
   const ticks = useMemo(() => {
-    const secs = DUR / 1000, per = clamp(Math.round(secs / Math.max(2, w / 90) / 5) * 5 || 1, 1, 30);
+    const secs = DUR / 1000, pxPerSec = w / Math.max(1, secs);
+    const per = [1, 2, 5, 10, 15, 30, 60].find((p) => p * pxPerSec >= 72) ?? 60;
     const out: number[] = []; for (let s = 0; s <= secs; s += per) out.push(s); return out;
-  }, [w]);
+  }, [w, DUR]);
 
   const tiles = Math.max(6, Math.ceil(w / 76));
   const caps = lines.map((text, i) => ({text: text.replace(/\*/g, '').trim(), i, a: tl.src[clamp(Math.round((LINE_TIMES[i][0] / 1000) * FPS), 0, tl.frames.length - 1)], b: tl.src[clamp(Math.round((LINE_TIMES[i][1] / 1000) * FPS), 0, tl.frames.length - 1)]})).filter((c) => c.text);
   const selZoom = zooms.find((z) => z.id === sel);
 
+  const ROW = 28;
   return (
-    <div className={`tl${lite ? ' lite' : ''}`} role="group" aria-label="Timeline">
+    <div className="tl" role="group" aria-label="Timeline">
       <div className="tl-bar">
-        <button className="ibtn" onClick={t.toggle} aria-label={t.playing ? 'Pause (Space)' : 'Play (Space)'} title="Play / pause (Space)">{t.playing ? Icon.pause : Icon.play}</button>
-        <span className="time">{fmtMs(outSec * 1000)}<i>/</i>{fmtMs(totalSec * 1000)}</span>
+        <button type="button" className="ibtn play" onClick={t.toggle} aria-label={t.playing ? 'Pause (Space)' : 'Play (Space)'} data-tip={t.playing ? 'Pause' : 'Play'}>{t.playing ? Icon.pause : Icon.play}</button>
+        <span className="time">{fmtMs(outSec * 1000)}<i>/</i><em>{fmtMs(totalSec * 1000)}</em></span>
         <span className="tl-sp" />
-        <button className="ibtn" onClick={onUndo} disabled={!canUndo} aria-label="Undo" title="Undo (⌘Z)">{Icon.undo}</button>
-        <button className="ibtn" onClick={onRedo} disabled={!canRedo} aria-label="Redo" title="Redo (⇧⌘Z)">{Icon.redo}</button>
-        <button className="chip" onClick={onAdd} title="Add a zoom at the playhead (Z)">{Icon.plus}Zoom<kbd>Z</kbd></button>
-        <button className="chip ghost" onClick={onDelete} disabled={!selZoom} title="Remove the selected zoom (Delete)">{Icon.trash}<span className="lbl">Remove</span></button>
+        <button type="button" className="ibtn" onClick={onUndo} disabled={!canUndo} aria-label="Undo" data-tip="Undo ⌘Z">{Icon.undo}</button>
+        <button type="button" className="ibtn" onClick={onRedo} disabled={!canRedo} aria-label="Redo" data-tip="Redo ⇧⌘Z">{Icon.redo}</button>
+        <span className="tl-div" aria-hidden />
+        <button type="button" className="chip" onClick={onAdd} data-tip="Add a zoom at the playhead">{Icon.plus}Zoom<kbd>Z</kbd></button>
+        <button type="button" className="ibtn" onClick={onDelete} disabled={!selZoom} aria-label="Remove the selected zoom" data-tip="Remove zoom ⌫">{Icon.trash}</button>
+        <span className="tl-div" aria-hidden />
+        <Popover label="Keyboard shortcuts" className="keys-pop" button={({open, toggle, id}) => (
+          <button type="button" className="ibtn" onClick={toggle} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} aria-label="Keyboard shortcuts" data-tip="Shortcuts">{SIcon.keys}</button>
+        )}>
+          {() => (
+            <ul className="keys">
+              <li><span>Play / pause</span><kbd>Space</kbd></li>
+              <li><span>Step a frame (⇧ for ten)</span><span><kbd>←</kbd><kbd>→</kbd></span></li>
+              <li><span>Add a zoom at the playhead</span><kbd>Z</kbd></li>
+              <li><span>Remove the selected zoom</span><kbd>⌫</kbd></li>
+              <li><span>Undo / redo</span><span><kbd>⌘Z</kbd><kbd>⇧⌘Z</kbd></span></li>
+            </ul>
+          )}
+        </Popover>
       </div>
       <div className="tl-body">
         <div className="tl-labels" aria-hidden>
           <span className="l-ruler" />
           <span className="l-clip">Clip</span>
-          <span className="l-zoom" style={{height: rows.n * 30 + 6}}>Zoom</span>
-          <span className="l-click">Clicks</span>
-          <span className="l-subs">Subs</span>
+          <span className="l-zoom" style={{height: rows.n * ROW + 4}}>Zoom</span>
+          {captionsOn && <span className="l-subs">Captions</span>}
         </div>
         <div className="tl-track" ref={track} onPointerDown={scrub}>
           <div className="tl-ruler">
@@ -135,17 +154,18 @@ export function Timeline({lite, t, tl, zooms, sel, lines, captionsOn, onSelect, 
           <div className="tl-clip" aria-hidden>
             {Array.from({length: tiles}, (_, i) => {
               const idx = Math.min(STRIP_N - 1, Math.floor(((i + 0.5) / tiles) * STRIP_N));
-              return <i key={i} style={{backgroundSize: `${STRIP_N * 100}% 100%`, backgroundPosition: `${(idx / (STRIP_N - 1)) * 100}% 0`}} />;
+              return <i key={i} style={{...(clip.strip ? {backgroundImage: `url(${clip.strip})`} : clip.demo ? {} : {backgroundImage: 'none'}), backgroundSize: `${STRIP_N * 100}% 100%`, backgroundPosition: `${(idx / (STRIP_N - 1)) * 100}% 0`}} />;
             })}
+            <span className="tl-clicks">{PLAN.clicks.map((c, i) => <b key={i} style={{left: pct(c.tMs)}} />)}</span>
           </div>
-          <div className="tl-zoom" style={{height: rows.n * 30 + 6}}>
+          <div className="tl-zoom" style={{height: rows.n * ROW + 4}}>
             {zooms.map((z) => {
               const len = z.endMs - z.startMs, a = (z.inMs / len) * 100, b = (z.outMs / len) * 100;
               return (
                 <div
                   key={z.id} className={`zblock${sel === z.id ? ' on' : ''}`} role="button" tabIndex={0}
                   aria-label={`Zoom ${z.scale.toFixed(1)} times, ${fmtMs(z.startMs)} to ${fmtMs(z.endMs)}`} aria-pressed={sel === z.id}
-                  style={{left: pct(z.startMs), width: pct(len), top: 3 + (rows.map.get(z.id) ?? 0) * 30}}
+                  style={{left: pct(z.startMs), width: pct(len), top: 2 + (rows.map.get(z.id) ?? 0) * ROW}}
                   onPointerDown={(e) => drag(e, z, 'move')} onKeyDown={(e) => blockKey(e, z)}
                   onDoubleClick={() => t.seekSrc(z.startMs + z.inMs + 200)}
                 >
@@ -157,14 +177,13 @@ export function Timeline({lite, t, tl, zooms, sel, lines, captionsOn, onSelect, 
               );
             })}
           </div>
-          <div className="tl-clicks" aria-hidden>
-            {PLAN.clicks.map((c, i) => <i key={i} style={{left: pct(c.tMs)}} />)}
-          </div>
-          <div className="tl-subs">
-            {captionsOn && caps.map((c) => (
-              <button key={c.i} className="cblock" style={{left: pct(c.a), width: pct(c.b - c.a)}} onClick={onCaptions} title="Edit this subtitle">{c.text}</button>
-            ))}
-          </div>
+          {captionsOn && (
+            <div className="tl-subs">
+              {caps.map((c) => (
+                <button key={c.i} type="button" className="cblock" style={{left: pct(c.a), width: pct(c.b - c.a)}} onClick={onCaptions} title="Edit this caption">{c.text}</button>
+              ))}
+            </div>
+          )}
           <div className="tl-head" style={{left: pct(srcMs)}} aria-hidden><i /></div>
         </div>
       </div>

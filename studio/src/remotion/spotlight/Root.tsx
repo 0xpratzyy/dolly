@@ -5,7 +5,7 @@ import {buildTimeline} from './timeline.ts';
 import {aspectSize, type SpotlightProps} from './types.ts';
 
 const defaults: SpotlightProps = {
-  items: [], scene: 'void', layout: 'single', aspect: '3:2', tilt: 9, dof: 0.6, motionBlur: 0.55, loop: false, shadow: 0.75,
+  items: [], scene: 'graphite', layout: 'single', aspect: '3:2', tilt: 3, intro: 'auto', push: 1.35, dof: 0.6, motionBlur: 0.55, loop: false, shadow: 0.75,
   cursor: {visible: true, size: 1.25, theme: 'mac', ripple: true},
 };
 

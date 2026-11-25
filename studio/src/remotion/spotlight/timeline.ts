@@ -20,6 +20,11 @@ export interface FrameState {
   arrive: number;
   cursorAlpha: number;
   titleAlpha: number;
+  /** context intro (single hero with a context screenshot): page = opacity of the real page around it, dim = its brightness,
+   * ring = the outline around the component, lift = 0 (in the page) .. 1 (isolated on the stage: full shadow) */
+  intro: {page: number; dim: number; ring: number; lift: number} | null;
+  /** 0..1 how far the action push-in is in (for the record; the camera already carries it) */
+  push: number;
 }
 export interface Built {
   W: number; H: number; u: number; fps: number; frames: number;
@@ -28,11 +33,21 @@ export interface Built {
   loopMix: number;
   /** absolute output frame at which each item's capture starts playing */
   playAt: number[];
+  /** capture time (ms) shown at playAt: the start of the active range (sounds are placed at playAt + tMs - startMs) */
+  startMs: number[];
+  /** the action push-in beats (output frames: ramp in from a to b, hold to c, out to d) with their zoom */
+  beats: {a: number; b: number; c: number; d: number; zoom: number}[];
 }
 
 const FOLLOW = 0.7; // how closely the camera centres the component's current box (a dropdown that opens glides the frame down)
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const smooth = (t: number) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
+const easeInOut = (t: number) => { t = clamp(t, 0, 1); return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; };
+/** Context intro beats (seconds): the ring draws in, then the page falls away while the component lifts and the camera eases
+ * onto it (one move), and the capture starts playing just before the camera lands. */
+export const INTRO = {ring0: 0.12, ring1: 0.45, lift0: 0.5, lift1: 1.3, play: 1.15};
+/** Height of the browser bar drawn above the context screenshot, in CSS px of the page. */
+export const CHROME_BAR = 40;
 
 interface Shot {
   start: number; end: number; // frames
@@ -48,8 +63,9 @@ export function heroFraction(item: SpotlightItem, W: number, H: number, hero?: n
   const bs = item.meta.bbox.filter(Boolean).map((b) => b![2]).sort((a, b) => a - b);
   const w = bs.length ? bs[Math.floor(bs.length * 0.6)] : item.meta.image.cssW, h = item.meta.image.cssH;
   // a big hero, like the references (the UI takes 45-90% of the frame): small components still leave air around them
-  let f = w <= 420 ? 0.52 : w <= 520 ? 0.58 : w <= 800 ? 0.68 : 0.76;
-  if (W < H) f = Math.min(0.84, f + 0.2); // portrait frames are narrow
+  // wide components fill about 60-70 % of the frame; the action push-in brings the detail closer when it matters
+  let f = w <= 420 ? 0.5 : w <= 520 ? 0.56 : w <= 800 ? 0.62 : 0.68;
+  if (W < H) f = Math.min(0.8, f + 0.14); // portrait frames are narrow (a wide component still leaves room to push in)
   return f;
 }
 
@@ -115,7 +131,7 @@ export function buildTimeline(items: SpotlightItem[], o: SpotlightOptions, outFp
     let ux0 = Infinity, uy0 = Infinity, ux1 = -Infinity, uy1 = -Infinity;
     for (const b of it.meta.bbox) if (b) { ux0 = Math.min(ux0, b[0]); uy0 = Math.min(uy0, b[1]); ux1 = Math.max(ux1, b[0] + b[2]); uy1 = Math.max(uy1, b[1] + b[3]); }
     const uw = ux1 > ux0 ? ux1 - ux0 : it.meta.image.cssW, uh = uy1 > uy0 ? uy1 - uy0 : it.meta.image.cssH;
-    const s = Math.min((fw * W) / mw, (0.72 * H) / mh, (0.88 * W) / uw, (0.8 * H) / uh);
+    const s = Math.min((fw * W) / mw, (0.7 * H) / mh, (0.88 * W) / uw, (0.78 * H) / uh);
     placed.push({x: 0, y: 0, z: 0, rot: 0, s, w: it.meta.image.cssW * s, h: it.meta.image.cssH * s});
     if (ux1 > ux0) singleCentre = {x: ((ux0 + ux1) / 2 - it.meta.image.cssW / 2) * s, y: ((uy0 + uy1) / 2 - it.meta.image.cssH / 2) * s};
   } else if (o.layout === 'carousel') {
@@ -148,17 +164,28 @@ export function buildTimeline(items: SpotlightItem[], o: SpotlightOptions, outFp
   const shots: Shot[] = [];
   const loopMode = o.loop && (o.layout === 'single' || n === 1);
   const ranges = items.map((it) => activeRange(it, loopMode));
+  // a lone hero keeps playing well past its last click: the result (a price that counts, a panel that settles) is the payoff
+  if (!loopMode && (o.layout === 'single' || n === 1)) {
+    const m = items[0].meta, last = Math.max(-1, ...m.clicks.map((c) => c.tMs), ...(m.keys ?? []).map((k) => k.tMs));
+    if (last >= 0) ranges[0][1] = Math.min(m.frames - 1, Math.max(ranges[0][1], Math.round(((last / 1000) + 1.6) * m.fps)));
+  }
   const durOf = (i: number) => Math.round(((ranges[i][1] - ranges[i][0] + 1) / capFps(items[i])) * fps);
-  const loopX = loopMode ? Math.min(Math.round(0.55 * fps), Math.floor(durOf(0) / 3)) : 0;
+  // context intro: only a lone hero whose capture saved the page (capture.mjs --context); off in a loop unless asked for
+  const singleMode = o.layout === 'single' || n === 1;
+  const ctx = singleMode ? items[0].meta.context : undefined;
+  const introOn = !!ctx && (o.intro === 'on' || ((o.intro ?? 'auto') === 'auto' && !o.loop));
+  const loopIntro = introOn && loopMode; // the intro every cycle: the end lowers the component back into the page (the seam)
+  const loopX = loopMode && !loopIntro ? Math.min(Math.round(0.55 * fps), Math.floor(durOf(0) / 3)) : 0;
   // zoom each component needs for its text to read, kept within what the frame can show
   const zFit = (i: number) => { const t = typical(items[i]); return Math.min((0.94 * W) / (t.w * placed[i].s), (0.9 * H) / (t.h * placed[i].s)); };
   const zoomOf = (i: number) => Math.max(1, Math.min(legibleZoom(items[i], placed[i].s, u), Math.max(1, zFit(i)) * 1.3));
   let total = 0;
   const heroTilt = (i: number) => o.tilt * ((i % 2 ? 1 : -1) * 0.3);
   if (o.layout === 'single' || n === 1) {
-    const pre = o.loop ? 0 : sec(0.5 * pace), post = o.loop ? 0 : sec(0.55);
+    const pre = introOn ? sec(INTRO.play) : o.loop ? 0 : sec(0.5 * pace), post = loopIntro ? sec(INTRO.play + 0.25) : o.loop ? 0 : sec(0.55);
     const d = durOf(0) - loopX;
-    shots.push({start: 0, end: pre + d + post, item: 0, cx: singleCentre.x, cy: singleCentre.y, zoom: Math.min(zoomOf(0), 1.25), ry: 0, rx: 0, playAt: pre, dip: 0, follow: true});
+    // zoom 1: the hero is sized by the layout above; the action push-in brings the detail closer when it is used
+    shots.push({start: 0, end: pre + d + post, item: 0, cx: singleCentre.x, cy: singleCentre.y, zoom: 1, ry: 0, rx: 0, playAt: pre, dip: 0, follow: true});
     total = pre + d + post;
   } else if (o.layout === 'carousel') {
     // the camera is already moving to the next component as the previous one resolves
@@ -202,8 +229,104 @@ export function buildTimeline(items: SpotlightItem[], o: SpotlightOptions, outFp
     shots.push({start: t2, end: t2 + sec(1.0), ...ov});
     total = t2 + sec(1.0);
   }
-  if (o.loop && o.layout === 'single') total = durOf(0) - loopX;
+  if (o.loop && o.layout === 'single' && !loopIntro) total = durOf(0) - loopX;
+
+  // ---------------------------------------------------------------- action push-in beats (single hero)
+  // Scheduled from the capture's clicks / key presses (hovers when there are none), never from cursor motion: each cluster of
+  // actions gets ONE ease in toward the control(s) it touches, a hold while the result animates, and an ease back out.
+  const beats: {a: number; b: number; c: number; d: number; zoom: number; cx: number; cy: number}[] = [];
+  let comp = {x0: 0, y0: 0, x1: 0, y1: 0};
+  if (singleMode && (o.push ?? 1.35) > 1.02) {
+    const it = items[0], m = it.meta, ps = placed[0], cf = capFps(it);
+    const pa = shots[0].playAt, startMs = (ranges[0][0] / cf) * 1000;
+    const outF = (tMs: number) => pa + Math.round(((tMs - startMs) / 1000) * fps);
+    const wx = (x: number) => (x - m.image.cssW / 2) * ps.s, wy = (y: number) => (y - m.image.cssH / 2) * ps.s;
+    let ux0 = Infinity, uy0 = Infinity, ux1 = -Infinity, uy1 = -Infinity;
+    for (const bb of m.bbox) if (bb) { ux0 = Math.min(ux0, bb[0]); uy0 = Math.min(uy0, bb[1]); ux1 = Math.max(ux1, bb[0] + bb[2]); uy1 = Math.max(uy1, bb[1] + bb[3]); }
+    if (!(ux1 > ux0)) { ux0 = 0; uy0 = 0; ux1 = m.image.cssW; uy1 = m.image.cssH; }
+    comp = {x0: wx(ux0), y0: wy(uy0), x1: wx(ux1), y1: wy(uy1)};
+    const frameAt = (tMs: number) => clamp(Math.round((tMs / 1000) * cf), 0, m.frames - 1);
+    const cursorAt = (tMs: number) => { const c = m.cursor[frameAt(tMs)]; return {x: c[1], y: c[2]}; };
+    let anchors: {t: number; x: number; y: number}[] = [
+      ...m.clicks.filter((c) => c.kind === 'down').map((c) => ({t: c.tMs, x: c.x, y: c.y})),
+      ...(m.keys ?? []).map((k) => ({t: k.tMs, ...cursorAt(k.tMs)})),
+    ];
+    if (!anchors.length) anchors = (m.hovers ?? []).map((h) => ({t: h.tMs, x: h.x, y: h.y}));
+    const maxMs = (m.frames / cf) * 1000 - (loopX ? (loopX / fps) * 1000 : 0);
+    anchors = anchors.filter((q) => q.t >= startMs && q.t <= maxMs).sort((p, q) => p.t - q.t);
+    const IN = 0.8, LEAD = 0.15, HOLD = 1.1, OUT = 0.85, MERGE = 1.6; // seconds
+    const clusters: {t0: number; t1: number; pts: typeof anchors}[] = [];
+    for (const q of anchors) {
+      const last = clusters[clusters.length - 1];
+      if (last && (q.t / 1000 - LEAD - IN) - (last.t1 / 1000 + HOLD + OUT) < MERGE) { last.t1 = q.t; last.pts.push(q); }
+      else clusters.push({t0: q.t, t1: q.t, pts: [q]});
+    }
+    // the control under each anchor: the smallest real box (cards) holding it, else a small square around the point
+    const regionOf = (pts: typeof anchors) => {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const q of pts) {
+        const cards = (m.cards?.[frameAt(q.t)] ?? []).filter((c) => q.x >= c[0] - 6 && q.x <= c[0] + c[2] + 6 && q.y >= c[1] - 6 && q.y <= c[1] + c[3] + 6 && c[2] * c[3] < 0.5 * (ux1 - ux0) * (uy1 - uy0)).sort((p, r) => p[2] * p[3] - r[2] * r[3]);
+        const r = cards[0] ? [cards[0][0], cards[0][1], cards[0][0] + cards[0][2], cards[0][1] + cards[0][3]] : [q.x - 40, q.y - 24, q.x + 40, q.y + 24];
+        x0 = Math.min(x0, r[0]); y0 = Math.min(y0, r[1]); x1 = Math.max(x1, r[2]); y1 = Math.max(y1, r[3]);
+      }
+      const pad = 48;
+      return {x0: wx(x0 - pad), y0: wy(y0 - pad), x1: wx(x1 + pad), y1: wy(y1 + pad)};
+    };
+    const cmx = (comp.x0 + comp.x1) / 2, cmy = (comp.y0 + comp.y1) / 2;
+    const lastPlay = pa + durOf(0) - loopX;
+    for (const cl of clusters) {
+      const R = regionOf(cl.pts);
+      let Z = Math.max(1, Math.min(o.push ?? 1.35, 0.9 * Math.min(W / Math.max(1, R.x1 - R.x0), H / Math.max(1, R.y1 - R.y0))));
+      // a component that would only just overflow the frame at Z is better shown whole and tidy (a centred push that fills
+      // ~88 % of the frame) than cropped by a sliver; one much bigger than the frame gets the close-up on the control
+      const zFitAll = Math.min((0.9 * W) / (comp.x1 - comp.x0), (0.88 * H) / (comp.y1 - comp.y0));
+      if (Z > zFitAll && Z < zFitAll * 1.15) Z = zFitAll;
+      // a close-up crops the component: worth it only when the controls span a good part of it on the cropped axis (a column
+      // of settings in a tall panel). A lone small control (a toggle that changes prices across three cards) gets the whole
+      // component, a little closer, instead of a crop through the cards it changes.
+      if (Z > zFitAll) {
+        const cropX = (comp.x1 - comp.x0) * Z > 0.98 * W, cropY = (comp.y1 - comp.y0) * Z > 0.98 * H;
+        const spanX = (R.x1 - R.x0) / (comp.x1 - comp.x0), spanY = (R.y1 - R.y0) / (comp.y1 - comp.y0);
+        if ((cropX && spanX < 0.3) || (cropY && spanY < 0.3)) Z = Math.max(1, zFitAll);
+      }
+      if (Z < 1.06) continue;
+      // centre on the control, but keep the frame inside the component (a toggle at the top edge does not leave half a frame of empty stage)
+      const hw = W / (2 * Z), hh = H / (2 * Z), mx = 0.03 * W / Z, my = 0.03 * H / Z;
+      const axis = (rc: number, c0: number, c1: number, cm: number, h: number, mg: number) => (c1 - c0 + 2 * mg <= 2 * h ? cm : clamp(rc, c0 - mg + h, c1 + mg - h));
+      const cx = axis((R.x0 + R.x1) / 2, comp.x0, comp.x1, cmx, hw, mx), cy = axis((R.y0 + R.y1) / 2, comp.y0, comp.y1, cmy, hh, my);
+      let b = outF(cl.t0) - sec(LEAD), a = b - sec(IN);
+      const minA = introOn ? pa + sec(0.15) : loopMode ? sec(0.1) : sec(0.35);
+      if (a < minA) { a = minA; b = Math.max(b, a + sec(0.45)); }
+      let c = outF(cl.t1) + sec(HOLD), d = c + sec(OUT);
+      if (loopMode) { // the loop's seam (or its outro) must be at the resting framing
+        const lim = loopIntro ? lastPlay - sec(0.1) : total - sec(0.1);
+        if (d > lim) { d = lim; c = Math.min(c, d - sec(0.5)); }
+        if (c <= b) continue;
+      }
+      beats.push({a, b, c, d, zoom: Z, cx, cy});
+    }
+    // a non-loop ends on the payoff: the whole component, held, after the last push-in has eased out
+    if (!o.loop && beats.length) total = Math.max(total, beats[beats.length - 1].d + sec(1.0));
+    if (!o.loop) shots[0].end = Math.max(shots[0].end, total);
+  }
+  const smoother = (t: number) => { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); };
+  const pushAt = (f: number) => {
+    let best = {p: 0, k: -1};
+    beats.forEach((q, k) => {
+      const p = f < q.a || f > q.d ? 0 : f < q.b ? smoother((f - q.a) / Math.max(1, q.b - q.a)) : f <= q.c ? 1 : 1 - smoother((f - q.c) / Math.max(1, q.d - q.c));
+      if (p > best.p) best = {p, k};
+    });
+    return best;
+  };
   const frames = Math.max(1, total);
+  // the camera on the whole page (the browser window filling the frame) for the context intro
+  let pageCam = {x: 0, y: 0, zoom: 1};
+  if (introOn && ctx) {
+    const m = items[0].meta, ps = placed[0], clip = m.clip ?? {x: 0, y: 0};
+    const left = -ps.w / 2 - clip.x * ps.s, top = -ps.h / 2 - clip.y * ps.s, bar = CHROME_BAR * ps.s;
+    const pw = ctx.w * ps.s, ph = ctx.h * ps.s + bar;
+    pageCam = {x: left + pw / 2, y: top - bar + ph / 2, zoom: Math.min((W < H ? 0.92 : 0.88) * W / pw, 0.86 * H / ph)};
+  }
 
   // ---------------------------------------------------------------- per-frame simulation (two laps in a loop so it settles periodic)
   const states: FrameState[] = [];
@@ -272,7 +395,7 @@ export function buildTimeline(items: SpotlightItem[], o: SpotlightOptions, outFp
       // cursor, so the component does not rock every time the pointer moves.
       const single = shots.length === 1;
       const sweep = smooth(prog) * 2 - 1; // -1 .. 1 across the clip
-      const push = single ? 0.955 + 0.045 * smooth(f / Math.max(1, sec(1.3 * pace))) + 0.035 * prog : 1 + 0.04 * smooth(local / span) - dip; // gentle push-in, then a slow creep
+      const push = single ? (introOn ? 1 + 0.02 * prog : 0.955 + 0.045 * smooth(f / Math.max(1, sec(1.3 * pace))) + 0.035 * prog) : 1 + 0.04 * smooth(local / span) - dip; // gentle push-in (or the intro), then a slow creep
       let target: Record<K, number>;
       if (o.loop) {
         const ph = (f / frames) * Math.PI * 2;
@@ -298,30 +421,58 @@ export function buildTimeline(items: SpotlightItem[], o: SpotlightOptions, outFp
         }
       }
       if (lap === laps - 1) {
-        const screen = {x: pos.x * pos.zoom, y: pos.y * pos.zoom, zoom: Math.log(pos.zoom), rot: pos.ry + pos.rx * 0.5 + pos.rz};
+        // scheduled moves on top of the spring (exact timing, no lag): the action push-in, then the context intro / outro
+        const cam = {x: pos.x, y: pos.y, zoom: pos.zoom, rx: pos.rx, ry: pos.ry, rz: pos.rz};
+        const pu = pushAt(f);
+        if (pu.k >= 0) {
+          const q = beats[pu.k];
+          cam.zoom *= 1 + (q.zoom - 1) * pu.p; cam.x += (q.cx - cam.x) * pu.p; cam.y += (q.cy - cam.y) * pu.p;
+          cam.rx *= 1 - 0.6 * pu.p; cam.ry *= 1 - 0.6 * pu.p; // flatter while the detail is close: crisper, no lean
+        }
+        let intro: FrameState['intro'] = null;
+        if (introOn && ctx) {
+          const ti = f / fps, to = loopIntro ? (frames - 1 - f) / fps : Infinity, tt = Math.min(ti, to);
+          const e = easeInOut((tt - INTRO.lift0) / (INTRO.lift1 - INTRO.lift0));
+          const ringIn = smooth((tt - INTRO.ring0) / (INTRO.ring1 - INTRO.ring0));
+          intro = {
+            page: 1 - smooth((tt - INTRO.lift0 - 0.05) / 0.6),
+            dim: 0.97 - 0.33 * ringIn,
+            ring: ringIn * (1 - smooth((tt - INTRO.lift0 - 0.2) / 0.4)),
+            lift: e,
+          };
+          if (e < 1) {
+            const pz = pageCam.zoom;
+            cam.zoom = Math.exp(Math.log(pz) + (Math.log(cam.zoom) - Math.log(pz)) * e);
+            cam.x = pageCam.x + (cam.x - pageCam.x) * e; cam.y = pageCam.y + (cam.y - pageCam.y) * e;
+            cam.rx *= e; cam.ry *= e; cam.rz *= e;
+          }
+        }
+        const screen = {x: cam.x * cam.zoom, y: cam.y * cam.zoom, zoom: Math.log(cam.zoom), rot: cam.ry + cam.rx * 0.5 + cam.rz};
         const sp = {x: screen.x - prevScreen.x, y: screen.y - prevScreen.y, z: screen.zoom - prevScreen.zoom, rot: screen.rot - prevScreen.rot};
         prevScreen = screen;
-        // depth of field is scheduled, never driven by camera speed (that pumped the blur on every cursor move): soft on the
-        // entrance, on the exit and while the camera travels between components; pin sharp the rest of the time. A loop has none.
+        // depth of field is scheduled, never driven by camera speed (that pumped the blur on every cursor move): soft only
+        // while the camera travels between components; pin sharp the rest of the time, including the first and last frames
+        // (the owner, 2026-11-24: no blur at the start and end). A loop has none.
         let arriving = 0;
         if (!o.loop) {
-          const inF = sec(0.75 * pace), outF = sec(0.4);
-          arriving = Math.max(arriving, 1 - smooth(f / inF), 0.7 * smooth((f - (frames - outF)) / outF));
           for (const q of shots) if (q.start > 0) { // travelling to the next component
             const a0 = q.start - sec(0.15), a1 = q.start + Math.min(q.end - q.start, sec(0.85 * pace));
             if (f > a0 && f < a1) arriving = Math.max(arriving, 0.8 * Math.sin(Math.PI * (f - a0) / (a1 - a0)));
           }
         }
-        const cAlpha = clamp((f - (o.loop ? 0 : sec(0.05))) / sec(0.2), 0, 1) * clamp((frames - f) / sec(0.25), 0, 1);
+        const c0 = introOn ? shots[0].playAt : o.loop ? 0 : sec(0.05);
+        const c1 = loopIntro ? frames - shots[0].playAt + sec(0.1) : frames;
+        const cAlpha = clamp((f - c0) / sec(introOn ? 0.3 : 0.2), 0, 1) * clamp((c1 - f) / sec(0.25), 0, 1);
         states.push({
-          cam: {x: pos.x, y: pos.y, zoom: pos.zoom, rx: pos.rx, ry: pos.ry, rz: pos.rz},
+          cam,
           vel: f === 0 ? {x: 0, y: 0, z: 0, rot: 0} : {x: sp.x, y: sp.y, z: sp.z, rot: sp.rot},
-          items: fr, hero, arrive: arriving, cursorAlpha: o.loop ? 1 : cAlpha,
+          items: fr, hero, arrive: arriving, cursorAlpha: o.loop && !loopIntro ? 1 : cAlpha, intro, push: pu.p,
           titleAlpha: o.title || o.wordmark ? clamp((f - sec(0.25)) / sec(0.5), 0, 1) * clamp((frames - f) / sec(0.6), 0, 1) : 0,
         });
       }
     }
   }
   const playAt = items.map((_, i) => shots.find((x) => x.item === i && x.playAt >= 0)?.playAt ?? 0);
-  return {W, H, u, fps, frames, placed, states, loopMix: loopX, playAt};
+  const startMs = items.map((it, i) => (loopX && i === 0 ? 0 : (ranges[i][0] / capFps(it)) * 1000));
+  return {W, H, u, fps, frames, placed, states, loopMix: loopX, playAt, startMs, beats: beats.map(({a, b, c, d, zoom}) => ({a, b, c, d, zoom}))};
 }

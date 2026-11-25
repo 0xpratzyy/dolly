@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Dolly Spotlight renderer: turns one or more spotlight captures (spotlight/capture.mjs) into a cinematic, feed-ready animation.
 //
-//   node spotlight.mjs <capture dir> [more dirs...] [--scene void|studio|wallpaper|desk|curtain] [--bg <background id>]
-//        [--layout single|carousel|collage|grid] [--aspect 3:2|16:9|1:1|4:5|9:16 | a,b,c] [--hero 0.4] [--tilt 9] [--dof 0.6]
+//   node spotlight.mjs <capture dir> [more dirs...] [--scene graphite|studio|wallpaper|void] [--bg <background id>]
+//        [--intro auto|on|off] [--push 1.35 (0 = off)]
+//        [--layout single|carousel|collage|grid] [--aspect 3:2|16:9|1:1|4:5|9:16 | a,b,c] [--hero 0.4] [--tilt 3] [--dof 0.6]
 //        [--motion-blur 0.55] [--loop] [--sound off|subtle|full] [--glow '#86E4F0'] [--title "..."] [--wordmark "..."]
 //        [--plate auto|on|off] [--reflection on|off] [--shadow 0.75] [--cursor off|mac|light] [--cursor-size 1.25] [--bg-blur 0] [--bg-dim 0] [--bg-drift 0]
 //        [--focus 0] [--pace 1] [--out file.mp4] [--frames a-b] [--concurrency 4] [--scale 1] [--still N]
@@ -24,15 +25,30 @@ for (let i = 0; i < argv.length; i++) {
 }
 if (pos[0] === 'spotlight') pos.shift();
 const die = (m) => { console.error(m); process.exit(1); };
-if (!pos.length) die('usage: node spotlight.mjs <capture dir> [...] [--scene void|studio|wallpaper|desk|curtain] [--layout single|carousel|collage|grid] [--aspect 3:2|16:9|1:1|4:5|9:16] [--loop] [--sound off|subtle|full]');
+const USAGE = `usage: node spotlight.mjs <capture dir> [more dirs...] [flags]
+  --scene graphite|studio|wallpaper|void   stage (default graphite: near-black, soft top light, faint floor sheen;
+                                           studio = clean off-white; wallpaper = any --bg, dimmed + softened; void = older flat black)
+  --bg <id>  --bg-blur 6  --bg-dim 0.22  --bg-grain  --bg-drift  --bg-image file      (wallpaper scene)
+  --intro auto|on|off    context intro: open on the real page, ring the component, lift it out (needs a capture made with
+                         --context, the default). auto = on, except in a --loop; on in a loop = every cycle
+  --push 1.35            camera eases in toward the control being clicked / typed into, holds, eases out (0 = off)
+  --layout single|carousel|collage|grid  --aspect 3:2|16:9|1:1|4:5|9:16 (comma list)  --hero 0.62  --tilt 3  --loop
+  --sound off|subtle|full  --dof 0.6  --motion-blur 0.55  --glow '#86E4F0'  --title "..."  --wordmark "..."
+  --cursor mac|light|off  --cursor-size 1.25  --ripple off  --reflection on|off  --shadow 0.75  --plate auto|on|off
+  --focus N  --pace 1  --out file.mp4  --frames a-b  --concurrency N  --scale 1  --still N  --quality lite|normal|max`;
+if (!pos.length || flags.help) { console.log(USAGE); process.exit(pos.length ? 0 : 1); }
 
 const dirs = pos.map((d) => path.resolve(d));
 const metas = dirs.map((d) => { const f = path.join(d, 'spotlight.json'); if (!fs.existsSync(f)) die(`no spotlight.json in ${d} (run spotlight/capture.mjs first)`); return JSON.parse(fs.readFileSync(f, 'utf8')); });
 const num = (v, d) => (v === undefined || v === 'true' ? d : Number(v));
 const layout = flags.layout ?? (dirs.length > 1 ? 'carousel' : 'single');
-const scene = flags.scene ?? (flags.bg ? 'wallpaper' : 'void');
+// desk and curtain were retired (busy stages hurt the UI); old commands still render: desk -> wallpaper, curtain -> graphite
+const sceneArg = flags.scene === 'desk' ? 'wallpaper' : flags.scene === 'curtain' ? 'graphite' : flags.scene;
+if (sceneArg && !['graphite', 'studio', 'wallpaper', 'void'].includes(sceneArg)) die(`unknown --scene ${flags.scene} (graphite, studio, wallpaper, void)`);
+const scene = sceneArg ?? (flags.bg ? 'wallpaper' : 'graphite');
 const bgId = flags.bg;
-const background = bgId ? {type: 'preset', value: bgId, grain: num(flags['bg-grain'], 0.18), blur: num(flags['bg-blur'], 0), dim: num(flags['bg-dim'], 0), drift: num(flags['bg-drift'], 0)} : (scene === 'wallpaper' || scene === 'desk' ? {type: 'preset', value: 'liquid-dusk', grain: 0.18} : undefined);
+// a wallpaper is dimmed and softened by default so the component reads on it (--bg-blur 0 --bg-dim 0 for the raw picture)
+const background = bgId ? {type: 'preset', value: bgId, grain: num(flags['bg-grain'], 0.18), blur: num(flags['bg-blur'], 6), dim: num(flags['bg-dim'], 0.22), drift: num(flags['bg-drift'], 0)} : (scene === 'wallpaper' ? {type: 'preset', value: 'liquid-dusk', grain: 0.18, blur: num(flags['bg-blur'], 6), dim: num(flags['bg-dim'], 0.22)} : undefined);
 if (flags['bg-image']) Object.assign(background ?? {}, {type: 'image', value: path.resolve(flags['bg-image'])});
 const sound = flags.sound ?? 'subtle';
 // --quality lite|normal|max (auto from the machine, docs/performance.md): lite = one Chrome tab, no motion blur or depth of field, animated backgrounds as stills
@@ -43,7 +59,7 @@ const aspects = (flags.aspect ?? flags.aspects ?? '3:2').split(',');
 const opt = {
   ...defaultSpotlightOptions, scene, background, layout,
   hero: flags.hero ? Number(flags.hero) : undefined,
-  tilt: num(flags.tilt, defaultSpotlightOptions.tilt), dof: num(flags.dof, quality.q.motionBlur ? defaultSpotlightOptions.dof : 0), motionBlur: num(flags['motion-blur'], quality.q.motionBlur ? defaultSpotlightOptions.motionBlur : 0),
+  tilt: num(flags.tilt, defaultSpotlightOptions.tilt), intro: ['on', 'off', 'auto'].includes(flags.intro) ? flags.intro : 'auto', push: num(flags.push, defaultSpotlightOptions.push), dof: num(flags.dof, quality.q.motionBlur ? defaultSpotlightOptions.dof : 0), motionBlur: num(flags['motion-blur'], quality.q.motionBlur ? defaultSpotlightOptions.motionBlur : 0),
   loop: !!flags.loop, shadow: num(flags.shadow, defaultSpotlightOptions.shadow),
   reflection: flags.reflection ? flags.reflection !== 'off' : undefined, glow: flags.glow ? (flags.glow === 'off' ? false : flags.glow) : undefined,
   cursor: {visible: flags.cursor !== 'off', size: num(flags['cursor-size'], 1.25), theme: flags.cursor === 'light' ? 'light' : 'mac', ripple: flags.ripple !== 'off'},
@@ -56,6 +72,8 @@ const pub = fs.mkdtempSync(path.join(path.dirname(dirs[0]), '.sp-public-'));
 const link = (from, to) => { fs.mkdirSync(path.dirname(to), {recursive: true}); try { fs.linkSync(from, to); } catch { fs.copyFileSync(from, to); } };
 const items = dirs.map((d, i) => {
   const id = `i${i}`;
+  if (metas[i].context && fs.existsSync(path.join(d, metas[i].context.image))) link(path.join(d, metas[i].context.image), path.join(pub, 'sp', id, metas[i].context.image));
+  else if (metas[i].context) delete metas[i].context;
   if (metas[i].image.video) link(path.join(d, metas[i].image.video), path.join(pub, 'sp', id, metas[i].image.video));
   else for (const f of fs.readdirSync(path.join(d, 'frames'))) link(path.join(d, 'frames', f), path.join(pub, 'sp', id, 'frames', f));
   return {id, base: `sp/${id}`, meta: metas[i], label: path.basename(d)};
@@ -75,9 +93,10 @@ try {
     const tl = buildTimeline(items, {...opt, aspect: aspects[0]}, fps);
     const ev = [];
     items.forEach((it, i) => {
-      const off = (tl.playAt[i] / fps) * 1000;
+      // the capture plays from its active range's start (tl.startMs) at output frame playAt
+      const off = (tl.playAt[i] / fps) * 1000 - tl.startMs[i];
       const maxT = (it.meta.frames / it.meta.fps) * 1000 - (opt.loop && layout === 'single' ? tl.loopMix / fps * 1000 : 0);
-      for (const s of it.meta.sounds ?? []) { if (opt.loop && s.tMs >= maxT) continue; ev.push({tMs: off + s.tMs, kind: s.kind}); }
+      for (const s of it.meta.sounds ?? []) { if ((opt.loop && s.tMs >= maxT) || s.tMs < tl.startMs[i]) continue; ev.push({tMs: off + s.tMs, kind: s.kind}); }
     });
     const {left, right} = renderSounds(ev, (tl.frames / fps) * 1000, sound);
     soundFile = 'ui-sounds.wav';

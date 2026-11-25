@@ -2,6 +2,7 @@ import {CAPTION_STYLES, INSTALL, PLAN, REPO_URL, SUBTLE_URL, exportStyle, toCapt
 import {backgroundCatalog} from '@studio/remotion/backgrounds.ts';
 import type {Style, Zoom} from '@studio/types.ts';
 import {zoomsChanged} from './editor/state';
+import type {Clip} from './clip';
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 export const styleJson = (s: Style) => JSON.stringify(exportStyle(s), null, 2) + '\n';
@@ -28,9 +29,10 @@ function describe(s: Style): string[] {
 /** The zoom list the visitor edited on the demo clip, as the planner's own zoom objects. */
 export const zoomsJson = (zooms: Zoom[]) => JSON.stringify({zooms: zooms.map(({id, startMs, endMs, inMs, outMs, scale, center, bbox, why}) => ({id, startMs, endMs, inMs, outMs, scale, center, bbox, why}))}, null, 2) + '\n';
 
-export function buildPrompt(s: Style, lines: string[], zooms: Zoom[] = PLAN.zooms): string {
-  const edited = zoomsChanged(zooms);
-  const caps = s.captions.enabled ? toCaptions(lines) : [];
+export function buildPrompt(s: Style, lines: string[], zooms: Zoom[] = PLAN.zooms, clip?: Clip): string {
+  const own = !!clip && !clip.demo;
+  const edited = zoomsChanged(zooms, clip?.plan.zooms ?? PLAN.zooms);
+  const caps = s.captions.enabled ? toCaptions(lines, clip?.lineTimes) : [];
   const L: string[] = [
     `Polish a screen recording with Dolly, the open-source Screen Studio alternative that Claude Code runs: ${REPO_URL}`,
     'It renders on this Mac with Remotion. Nothing is uploaded and no account is needed.',
@@ -55,7 +57,7 @@ export function buildPrompt(s: Style, lines: string[], zooms: Zoom[] = PLAN.zoom
     '## 3. Plan and render',
     '```bash',
     'cd ~/.claude/skills/dolly/studio',
-    'node dolly.mjs plan ~/Movies/my-demo',
+    ...(own ? [] : ['node dolly.mjs plan ~/Movies/my-demo']),
     `node dolly.mjs render ~/Movies/my-demo --style ~/dolly-style.json${caps.length ? ' --captions ~/Movies/my-demo/captions.json' : ''} --out ~/Movies/my-demo/polished.mp4`,
     '```',
     ...(caps.length
@@ -67,7 +69,13 @@ export function buildPrompt(s: Style, lines: string[], zooms: Zoom[] = PLAN.zoom
         ]
       : []),
     '',
-    ...(edited
+    ...(own
+      ? [
+          '## Camera edits',
+          'My zooms are already in ~/Movies/my-demo/plan.json (saved from the Dolly web editor). Do not run `plan` again, it would overwrite them; render uses plan.json as it is.',
+          '',
+        ]
+      : edited
       ? [
           '## Camera edits',
           'I edited the zooms by hand on the demo clip (times are from that clip). After `plan`, open plan.json and keep my intent for the zooms: depth (`scale`), ease (`inMs` / `outMs`) and focus (`center`). Retime them to my own recording\'s click clusters, or, if the recording is the demo itself, replace the `zooms` array with:',

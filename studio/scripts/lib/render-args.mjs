@@ -54,7 +54,8 @@ export async function resolveRender(dir, flags, sets) {
   const cs = style.captions?.style;
   if (cs && style.captions.enabled && (Array.isArray(captions) ? captions.length : captions.pages?.length)) {
     const [nm, variant] = String(cs).split(':');
-    const f = fs.existsSync(cs) ? cs : path.join(subtleDir, 'styles', `${nm}.json`);
+    const own = path.join(studioDir, 'caption-styles', `${nm}.json`); // Dolly's own styles (clean) first, then Subtle's
+    const f = fs.existsSync(cs) ? cs : fs.existsSync(own) ? own : path.join(subtleDir, 'styles', `${nm}.json`);
     if (!fs.existsSync(f)) throw new Error(`unknown caption style "${cs}" (looked for ${f}). Styles live in studio/vendor/subtle/styles (or set SUBTLE_DIR to your own Subtle checkout).`);
     captionStyle = readJson(f);
     if (variant && captionStyle.variants?.[variant]) captionStyle = mergeStyle(captionStyle, captionStyle.variants[variant]);

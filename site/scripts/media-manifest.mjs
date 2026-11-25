@@ -1,10 +1,10 @@
-// Writes src/media-manifest.json: a short content hash for every file under public/spot, public/narrate, public/hero and public/hero/looks (used as ?v= by src/media.ts).
+// Writes src/media-manifest.json: a short content hash for every file under public/spot, public/narrate, public/hero, public/hero/looks and public/bento (used as ?v= by src/media.ts).
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const out = {};
-for (const dir of ['spot', 'narrate', 'hero', 'hero/looks']) {
+for (const dir of ['spot', 'narrate', 'hero', 'hero/looks', 'bento']) {
   const d = path.join(root, 'public', dir);
   if (!fs.existsSync(d)) continue;
   for (const f of fs.readdirSync(d).sort()) if (fs.statSync(path.join(d, f)).isFile()) out[`${dir}/${f}`] = crypto.createHash('sha1').update(fs.readFileSync(path.join(d, f))).digest('hex').slice(0, 8);

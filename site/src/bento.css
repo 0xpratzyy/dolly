@@ -1,0 +1,214 @@
+/* The bento (Bento.tsx). Every rule nests under .dbn so nothing leaks; the grid answers to its own width (container
+   queries), and each picture is a Stage at 1:1 pinned to its tile's foot, cropped by the tile. Graphite tiles one step
+   up from the page, depth from lighter surfaces, ivory ink, ice only on the caption playhead. */
+.lp-bento h2 { margin-bottom: 40px; }
+
+.dbn {
+  --pad: 32px;
+  --gap: 16px;
+  --tile: #141516;
+  --raised: #1D1E20;
+  --deep: #0E0F10;
+  --hair: rgba(255, 255, 255, .07);
+  container-type: inline-size;
+
+  & .dbn-grid {
+    display: grid; gap: var(--gap);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'hero' 'stat' 'spot' 'ask' 'shape' 'looks' 'caps' 'open';
+    grid-template-rows: calc(128px + (100cqw - 24px) * 0.53) auto 520px 316px 316px 316px 316px auto;
+  }
+  @container (min-width: 640px) {
+    & .dbn-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-areas: 'hero hero' 'stat spot' 'ask spot' 'shape looks' 'caps caps' 'open open';
+      grid-template-rows: calc(112px + (100cqw - 32px) * 0.464) 340px 340px 340px 300px auto;
+    }
+  }
+  @container (min-width: 1040px) {
+    & .dbn-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-areas: 'hero hero stat' 'spot ask shape' 'spot looks caps' 'open open open';
+      grid-template-rows: 452px 340px 340px auto;
+    }
+  }
+  @container (max-width: 639px) { & .dbn-grid { --pad: 24px; --gap: 12px; } }
+
+  /* ---- the tile: one frame for all ---- */
+  & .dbn-tile {
+    position: relative; overflow: hidden; min-width: 0; border-radius: 24px; background: var(--tile);
+    box-shadow: inset 0 0 0 1px var(--hair), inset 0 1px 0 rgba(255, 255, 255, .03);
+  }
+  /* the tile's hairline sits over the pictures it crops */
+  & .dbn-tile::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px var(--hair); pointer-events: none; z-index: 3; }
+  & .dbn-tile--hero { grid-area: hero; }
+  & .dbn-tile--stat { grid-area: stat; }
+  & .dbn-tile--spot { grid-area: spot; }
+  & .dbn-tile--ask { grid-area: ask; }
+  & .dbn-tile--shape { grid-area: shape; }
+  & .dbn-tile--looks { grid-area: looks; }
+  & .dbn-tile--caps { grid-area: caps; }
+  & .dbn-tile--open { grid-area: open; }
+
+  /* run-in copy: the bold lead and its quieter continuation at one size, page type */
+  & .dbn-copy {
+    position: relative; z-index: 2; max-width: 380px; margin: 0; padding: 28px var(--pad) 0;
+    font-size: 18px; line-height: 26px; letter-spacing: -0.012em; font-weight: 500; color: var(--mute); text-wrap: pretty;
+  }
+  & .dbn-copy b { font-weight: 600; color: var(--ink); }
+  & .dbn-tile--hero .dbn-copy { max-width: 520px; }
+
+  /* ---- pictures: pinned to the foot, cropped by the tile ---- */
+  & .dbn-pic { position: absolute; left: 0; bottom: 0; width: 100%; }
+  & .dbn-stage .ss-stage { overflow: hidden; background: transparent; --ss-font: var(--sans); --ss-mono: var(--mono); }
+
+  /* ---- Zooms: the real render, a gutter in from top-left, running off the right and the foot ---- */
+  & .dbn-film {
+    position: absolute; left: var(--pad); top: 112px; width: calc((100% - var(--pad)) * 1.1); aspect-ratio: 16 / 9;
+    border-radius: 16px 0 0 0; overflow: hidden; background: #0A0A0B;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .08), 0 30px 80px -30px rgba(0, 0, 0, .9);
+  }
+  & .dbn-film-vid { display: block; width: 100%; height: 100%; object-fit: cover; }
+  @container (max-width: 639px) {
+    & .dbn-film { top: 128px; width: calc((100% - var(--pad)) * 1.18); }
+  }
+
+  /* ---- Fast: type, not a picture ---- */
+  & .dbn-stat { display: flex; flex-direction: column; box-sizing: border-box; height: 100%; padding: 28px var(--pad) 30px; }
+  & .dbn-stat-lead { font-size: 18px; line-height: 26px; font-weight: 600; letter-spacing: -0.012em; color: var(--ink); }
+  & .dbn-stat-num {
+    margin-top: 28px; display: flex; align-items: baseline; gap: 6px; white-space: nowrap;
+    font-size: 120px; line-height: 0.9; font-weight: 600; letter-spacing: -0.05em; font-variant-numeric: tabular-nums; color: var(--ink);
+  }
+  & .dbn-stat-unit { font-size: 52px; letter-spacing: -0.03em; color: var(--ink2); }
+  & .dbn-stat-label { max-width: 300px; margin-top: 14px; font-size: 15px; line-height: 22px; color: var(--mute); text-wrap: pretty; }
+  /* the 10 s clip as a filmstrip, its frames filling on the stopwatch's clock */
+  & .dbn-strip { margin-top: auto; padding-top: 20px; }
+  & .dbn-strip-cells {
+    display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 3px; padding: 6px 0;
+    border-block: 1px dashed var(--line2);
+  }
+  & .dbn-strip-cells i { display: block; height: 44px; border-radius: 3px; background: var(--c-surface-hover); transition: background-color .12s; }
+  & .dbn-strip-cells i[data-on] { background: var(--c-ink-secondary); }
+  & .dbn-strip-scale { display: flex; justify-content: space-between; margin-top: 8px; font: 400 12px/16px var(--mono); color: var(--dim); }
+  @container (max-width: 639px) {
+    & .dbn-stat { min-height: 340px; }
+    & .dbn-stat-num { font-size: 96px; }
+    & .dbn-stat-unit { font-size: 44px; }
+  }
+
+  /* ---- Spotlight: the clip is the ground, the panel centered in it, its sky dissolving into the tile ---- */
+  & .dbn-spot { position: absolute; left: 0; right: 0; bottom: 0; top: 92px; }
+  & .dbn-spot-vid {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 50%;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 72px); mask-image: linear-gradient(to bottom, transparent 0, #000 72px);
+  }
+  @container (min-width: 640px) and (max-width: 1039px) { & .dbn-spot { top: 120px; } }
+
+  /* ---- Ask: a Claude Code turn, chromeless, a gutter in and off the right and foot ---- */
+  & .dbn-term {
+    position: absolute; left: var(--pad); top: 6px; right: -28px; bottom: -32px; box-sizing: border-box; padding: 16px 20px;
+    border-radius: 16px 0 0 0; background: var(--deep); box-shadow: 0 0 0 1px var(--hair);
+    font: 400 13px/20px var(--mono); color: var(--mute);
+  }
+  & .dbn-term-line { display: grid; grid-template-columns: 3ch minmax(0, 1fr); align-items: start; }
+  & .dbn-term-line + .dbn-term-line, & .dbn-term .ss-collapse { margin-top: 10px; }
+  & .dbn-term .ss-collapse .dbn-term-sub { margin-top: 2px; }
+  & .dbn-term-text { min-width: 0; }
+  & .dbn-term-you {
+    margin: 0 -10px; padding: 9px 10px; border-radius: 10px;
+    box-shadow: inset 0 0 0 1px var(--line2); transition: box-shadow .35s ease, background-color .35s ease;
+  }
+  & .dbn-term-you[data-sent] { box-shadow: inset 0 0 0 1px transparent; background: rgba(255, 255, 255, .055); }
+  & .dbn-term-mark { display: inline-grid; place-items: center start; height: 20px; color: var(--mute); }
+  & .dbn-strong { color: var(--ink); }
+  & .dbn-faint { color: var(--dim); }
+  & .dbn-dot { display: block; width: 8px; height: 8px; border-radius: 50%; background: var(--mute); }
+  & .dbn-dot--on { background: var(--ink); }
+  & .dbn-spin { display: inline-block; color: var(--ink2); animation: dbn-spin 1.2s linear infinite; }
+  & .dbn-caret { display: inline-block; width: 7px; height: 15px; margin-left: 3px; vertical-align: -3px; background: var(--ink); opacity: 0; transition: opacity .2s; }
+  & .dbn-caret[data-on] { opacity: 1; }
+  & .dbn-term .ss-collapse:has(.dbn-term-next) { margin-top: 18px; }
+  & .dbn-caret--blink { width: 7px; opacity: 1; background: var(--mute); animation: dbn-blink 1.1s steps(1) infinite; }
+
+  /* ---- Shapes: the real 16:9 frame, its phone take straddling its right edge, off the foot ---- */
+  & .dbn-land {
+    position: absolute; aspect-ratio: 16 / 9;
+    border-radius: 12px; background: #14171b center / cover no-repeat; box-shadow: 0 0 0 1px rgba(255, 255, 255, .08);
+  }
+  & .dbn-port {
+    position: absolute; aspect-ratio: 9 / 16; box-sizing: border-box; padding: 4px; will-change: transform;
+    border-radius: 18px; background: var(--raised);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .1), 0 24px 48px -12px rgba(0, 0, 0, .85), 0 6px 14px -6px rgba(0, 0, 0, .6);
+    transform: translateY(56px); transition: transform 1s cubic-bezier(.25, .8, .25, 1);
+  }
+  & .dbn-shapes { position: absolute; inset: 0; }
+  & .dbn-shapes[data-on] .dbn-port { transform: none; }
+  & .dbn-port-page {
+    display: flex; flex-direction: column; gap: 6px; height: 100%; box-sizing: border-box; padding: 10px 10px 0; border-radius: 14px; overflow: hidden;
+    background: radial-gradient(120% 60% at 50% 30%, #1d1e20, #0a0a0b 70%);
+  }
+  & .dbn-port-nav { display: flex; align-items: center; justify-content: space-between; height: 12px; margin-bottom: 14px; }
+  & .dbn-port-logo { width: 10px; height: 10px; border-radius: 3px; background: var(--ink2); }
+  & .dbn-port-h { font-size: 15px; line-height: 16px; font-weight: 600; letter-spacing: -0.03em; color: var(--ink); margin-bottom: 4px; }
+  & .dbn-port-search { display: block; height: 18px; margin-top: 8px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--line2); }
+  & .dbn-ratio {
+    position: absolute; left: 8px; bottom: 8px; padding: 2px 7px; border-radius: 999px; background: rgba(10, 10, 11, .78);
+    font: 400 11px/16px var(--mono); color: var(--ink2);
+  }
+  & .dbn-land .dbn-ratio { bottom: auto; top: 8px; }
+  & .dbn-land { border-radius: 12px 0 0 12px; }
+  & .dbn-port .dbn-ratio { left: auto; right: 10px; bottom: auto; top: 9px; }
+
+  /* ---- Looks: the frame's ground, a gutter in and off the right and foot; the picker the editor puts over it ---- */
+  & .dbn-preview {
+    position: absolute; left: var(--pad); top: 6px; right: -36px; bottom: -36px; overflow: hidden;
+    border-radius: 14px 0 0 0; background: #222; box-shadow: 0 0 0 1px rgba(255, 255, 255, .08);
+  }
+  & .dbn-preview img {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .7s cubic-bezier(.25, .8, .25, 1);
+  }
+  & .dbn-preview img[data-on] { opacity: 1; }
+  & .dbn-preview-win { position: absolute; left: 40px; top: 30px; width: calc(100% - 24px); height: 230px; box-shadow: 0 24px 50px -20px rgba(0, 0, 0, .7); }
+  & .dbn-preview-body { display: flex; flex-direction: column; gap: 9px; padding: 22px 20px; }
+  & .dbn-picker {
+    position: absolute; left: 14px; bottom: calc(36px + 36px); display: flex; gap: 6px; padding: 6px; border-radius: 14px;
+    background: rgba(14, 15, 16, .86); box-shadow: 0 0 0 1px rgba(255, 255, 255, .08), 0 16px 32px -12px rgba(0, 0, 0, .8);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  }
+  & .dbn-thumb { display: block; width: 44px; height: 30px; border-radius: 8px; background: center / cover no-repeat; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); }
+  & .dbn-ring { border-radius: 10px; box-shadow: 0 0 0 2px var(--ink); pointer-events: none; z-index: 2; }
+
+  /* ---- Captions: one line on its pill, the waveform it was cut from under it ---- */
+  & .dbn-caps { position: absolute; inset: 0; --pitch: 8px; }
+  & .dbn-caption {
+    position: absolute; left: var(--pad); top: 22px; white-space: nowrap;
+    padding: 10px 18px; border-radius: 999px; background: #050506;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .09), 0 18px 40px -16px rgba(0, 0, 0, .9);
+    font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -0.01em; color: #fff;
+  }
+  & .dbn-wave { position: absolute; left: var(--pad); top: 118px; height: 40px; display: flex; align-items: center; gap: 4px; }
+  & .dbn-wave i { display: block; flex: none; width: 4px; border-radius: 2px; background: var(--c-deco); opacity: .55; transition: opacity .25s, background-color .25s; }
+  & .dbn-wave i[data-past] { background: var(--ink); opacity: .9; }
+  & .dbn-head {
+    position: absolute; top: -14px; bottom: -14px; width: 2px; margin-left: -3px; border-radius: 1px; background: var(--ice);
+    transition: left .11s linear;
+  }
+}
+
+/* the open strip: copy and its two ways in */
+.dbn .dbn-tile--open { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 26px var(--pad); }
+.dbn .dbn-tile--open .dbn-copy { padding: 0; max-width: none; }
+.dbn .dbn-open-actions { display: flex; gap: 12px; flex: none; }
+@container (max-width: 639px) {
+  .dbn .dbn-tile--open { flex-direction: column; align-items: stretch; padding: 24px var(--pad); }
+  .dbn .dbn-open-actions { flex-direction: column; }
+  .dbn .dbn-open-actions .pill { height: 52px; }
+}
+
+@keyframes dbn-spin { to { transform: rotate(360deg); } }
+@keyframes dbn-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .dbn .dbn-port, .dbn .dbn-preview img, .dbn .dbn-head, .dbn .dbn-term-you { transition: none; }
+  .dbn .dbn-spin, .dbn .dbn-caret--blink { animation: none; }
+}

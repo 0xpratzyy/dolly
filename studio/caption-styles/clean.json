@@ -1,0 +1,56 @@
+{
+  "name": "clean",
+  "label": "Clean",
+  "description": "Dolly's default: one short line in sentence case inside a quiet dark pill, every word visible at once, fading in and out. No word-by-word reveal, no highlight colour.",
+  "engines": [
+    "remotion"
+  ],
+  "font": {
+    "family": "Inter SemiBold",
+    "file": "Inter-SemiBold.ttf",
+    "weight": 600
+  },
+  "case": "sentence",
+  "size": 3.2,
+  "wideScale": 1.35,
+  "lineHeight": 1.28,
+  "letterSpacing": -0.005,
+  "color": "#F5F5F7",
+  "shadow": null,
+  "backdropBlur": 20,
+  "container": {
+    "kind": "pill",
+    "fill": "rgba(18,18,20,0.62)",
+    "highlight": "rgba(255,255,255,0.10)",
+    "padX": 0.85,
+    "padY": 0.55,
+    "radius": 0.6
+  },
+  "emphasis": {
+    "color": "#F5F5F7"
+  },
+  "position": {
+    "y": 74,
+    "marginX": 9
+  },
+  "page": {
+    "maxWords": 8,
+    "maxCharsPerLine": 34,
+    "maxCharsPerLineWide": 52,
+    "maxLines": 1,
+    "minFrames": 24,
+    "maxFrames": 120,
+    "gapBreakMs": 400
+  },
+  "anim": {
+    "type": "glass",
+    "pageIn": 6,
+    "pageOut": 6,
+    "pageScaleFrom": 0.985,
+    "wordIn": 0,
+    "dim": 1
+  },
+  "behind": {
+    "enabled": false
+  }
+}

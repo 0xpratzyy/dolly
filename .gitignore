@@ -9,6 +9,7 @@ internal/
 # Demo footage that is not ours to publish (a real person in Subtle's demo clip, recordings of refs.video).
 # Regenerate locally: see docs/media.md
 site/public/hero/
+site/public/bento/
 site/public/demo/
 site/public/spot/
 site/public/narrate/
