@@ -233,7 +233,8 @@ async function scrollBy(total, ms = scrollMs(total)) {
   }
 }
 
-const SELECTOR = /^(text=|css=|xpath=|role=|id=|data-testid=|\/\/|#|\.|\[|:|[a-z][a-z0-9-]*(\[|\.|#|:|\s*>))/i;
+// a tag followed by ':' is a selector only for a pseudo-class written tight (a:hover), not label text ("Look: Golden meadow")
+const SELECTOR = /^(text=|css=|xpath=|role=|id=|data-testid=|\/\/|#|\.|\[|:|[a-z][a-z0-9-]*(\[|\.|#|:[a-z(-]|\s*>))/i;
 /** "Pricing" -> a visible link/button/text with that text; a CSS or Playwright selector is used as is. */
 async function locate(spec, maxWaitMs = 8000) {
   const first = async (loc) => {

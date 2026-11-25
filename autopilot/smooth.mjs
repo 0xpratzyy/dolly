@@ -372,7 +372,8 @@ async function scrollTo(total, ms) {
   }
 }
 
-const SELECTOR = /^(text=|css=|xpath=|role=|id=|data-testid=|\/\/|#|\.|\[|:|[a-z][a-z0-9-]*(\[|\.|#|:|\s*>))/i;
+// a tag followed by ':' is a selector only for a pseudo-class written tight (a:hover), not label text ("Look: Golden meadow")
+const SELECTOR = /^(text=|css=|xpath=|role=|id=|data-testid=|\/\/|#|\.|\[|:|[a-z][a-z0-9-]*(\[|\.|#|:[a-z(-]|\s*>))/i;
 async function locateOnce(spec) {
   const first = async (loc) => {
     const n = await loc.count();
