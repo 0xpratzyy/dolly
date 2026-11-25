@@ -30,7 +30,12 @@ export function initAnalytics() {
         autocapture: true,
         disable_session_recording: true,
         loaded: (p) => {
-          p.register({site: 'dolly'});
+          // where this visit came from: ?from=x (our own links), else utm_source. `from` is this visit's source,
+          // `first_from` the one that first brought the person here (kept for good)
+          const q = new URLSearchParams(location.search);
+          const from = (q.get('from') || q.get('utm_source') || '').toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 40);
+          p.register({site: 'dolly', ...(from ? {from} : {})});
+          if (from) (p as unknown as {register_once: (o: Props) => void}).register_once({first_from: from});
           p.capture('$pageview');
           ph = p;
           for (const [e, pr] of queue.splice(0)) p.capture(e, pr);
